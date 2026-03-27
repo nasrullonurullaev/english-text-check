@@ -25,6 +25,15 @@ ALLOWED_ACTIONS = set(
     if x.strip()
 )
 
+REQUIRED_CHECK_FIELDS = (
+    "feature",
+    "title_violations",
+    "commit_violations",
+    "comment_violations",
+    "has_violations",
+    "comment",
+)
+
 
 def response(status_code, body):
     return {
@@ -191,10 +200,28 @@ def fetch_pr_commits(owner, repo, pr_number):
     return data
 
 
+def normalize_check_result(raw_result):
+    result = raw_result if isinstance(raw_result, dict) else {}
+    normalized = {}
+
+    for field in REQUIRED_CHECK_FIELDS:
+        normalized[field] = result.get(field)
+
+    normalized["feature"] = str(normalized["feature"] or "")
+    normalized["title_violations"] = normalized["title_violations"] or []
+    normalized["commit_violations"] = normalized["commit_violations"] or []
+    normalized["comment_violations"] = normalized["comment_violations"] or []
+    normalized["has_violations"] = bool(normalized["has_violations"])
+    normalized["comment"] = str(normalized["comment"] or "")
+
+    return normalized
+
+
 def run_enabled_checks(pr_title, commits, diff_text):
     results = []
     for check in get_enabled_checks():
-        results.append(check.run(pr_title=pr_title, commits=commits, diff_text=diff_text))
+        raw_result = check.run(pr_title=pr_title, commits=commits, diff_text=diff_text)
+        results.append(normalize_check_result(raw_result))
     return results
 
 
