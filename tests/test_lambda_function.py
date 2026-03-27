@@ -108,3 +108,31 @@ def test_lambda_handler_success_path(monkeypatch):
     assert body["ok"] is True
     assert body["status_state"] == "success"
     assert len(calls) == 2
+
+
+def test_run_enabled_checks_normalizes_result(monkeypatch):
+    class BadCheck:
+        @staticmethod
+        def run(pr_title, commits, diff_text):
+            return {"feature": "custom"}
+
+    monkeypatch.setattr(lf, "get_enabled_checks", lambda: [BadCheck])
+
+    results = lf.run_enabled_checks("title", [], "diff --git a/a b/a")
+    assert len(results) == 1
+    result = results[0]
+    assert result["feature"] == "custom"
+    assert result["title_violations"] == []
+    assert result["commit_violations"] == []
+    assert result["comment_violations"] == []
+    assert result["has_violations"] is False
+    assert result["comment"] == ""
+
+
+def test_aggregate_english_result_fallback():
+    result = lf.aggregate_english_result([{"feature": "other"}])
+    assert result["title_violations"] == []
+    assert result["commit_violations"] == []
+    assert result["comment_violations"] == []
+    assert result["has_violations"] is False
+    assert result["comment"] == ""
