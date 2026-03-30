@@ -32,6 +32,7 @@ REQUIRED_CHECK_FIELDS = (
     "comment_violations",
     "has_violations",
     "comment",
+    "is_advisory",
 )
 
 
@@ -213,6 +214,7 @@ def normalize_check_result(raw_result):
     normalized["comment_violations"] = normalized["comment_violations"] or []
     normalized["has_violations"] = bool(normalized["has_violations"])
     normalized["comment"] = str(normalized["comment"] or "")
+    normalized["is_advisory"] = bool(normalized["is_advisory"])
 
     return normalized
 
@@ -236,7 +238,24 @@ def aggregate_english_result(check_results):
         "comment_violations": [],
         "has_violations": False,
         "comment": "",
+        "is_advisory": False,
     }
+
+
+
+
+def collect_advisory_comments(check_results):
+    comments = []
+
+    for result in check_results:
+        if not result.get("is_advisory"):
+            continue
+
+        comment = (result.get("comment") or "").strip()
+        if comment:
+            comments.append(comment)
+
+    return comments
 
 
 # Backward-compatible exports used by tests and existing integrations.
@@ -318,18 +337,26 @@ def lambda_handler(event, context):
 
         check_results = run_enabled_checks(pr_title=pr_title, commits=commits, diff_text=diff_text)
         english_result = aggregate_english_result(check_results)
+        advisory_comments = collect_advisory_comments(check_results)
 
         title_violations = english_result["title_violations"]
         commit_violations = english_result["commit_violations"]
         comment_violations = english_result["comment_violations"]
         has_violations = english_result["has_violations"]
 
-        if has_violations:
+        comment_blocks = []
+        if has_violations and english_result["comment"]:
+            comment_blocks.append(english_result["comment"])
+
+        comment_blocks.extend(advisory_comments)
+
+        if comment_blocks:
+            full_comment = "\n\n---\n\n".join(comment_blocks)
             comment_status, comment_body, _ = post_pr_comment(
                 repo_owner,
                 repo_name,
                 int(pr_number),
-                english_result["comment"],
+                full_comment,
             )
 
             if comment_status >= 300:
@@ -340,6 +367,7 @@ def lambda_handler(event, context):
                     "gitea_body": comment_body[:2000],
                 })
 
+        if has_violations:
             status_state = "failure"
             status_description = "Non-English characters found"
         else:
@@ -371,6 +399,7 @@ def lambda_handler(event, context):
             "title_violations": len(title_violations),
             "commit_violations": len(commit_violations),
             "comment_violations": len(comment_violations),
+            "advisory_comments": len(advisory_comments),
             "status_context": STATUS_CONTEXT,
             "status_state": status_state,
         })

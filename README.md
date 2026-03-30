@@ -2,6 +2,8 @@
 
 AWS Lambda function for checking English-only text in Gitea pull requests.
 
+It can also provide **non-blocking commit message recommendations** using an OpenAI-compatible API.
+
 ## Architecture
 
 - `lambda_function.py` is the single entrypoint (webhook parsing, Gitea API calls, PR flow).
@@ -17,3 +19,18 @@ pytest -q
 ## CI
 
 Tests run automatically on every pull request via GitHub Actions (`.github/workflows/tests.yml`).
+
+
+## Optional: AI commit message advisor (recommendations only)
+
+The advisor checks commit messages against the classic 7 rules (subject/body
+split, subject length, imperative mood, etc.) and posts suggestions as a PR
+comment. It **never fails** the status check by itself.
+
+Environment variables:
+
+- `COMMIT_MESSAGE_ADVISOR_ENABLED=true` to enable advisor mode.
+- `OPENAI_API_KEY=<your token>` to authenticate with the model provider.
+- `COMMIT_MESSAGE_ADVISOR_MODEL=gpt-4o-mini` (default) for a fast/cheap model.
+- `OPENAI_BASE_URL=https://api.openai.com/v1` for OpenAI-compatible endpoints.
+- `COMMIT_MESSAGE_ADVISOR_MAX_COMMITS=20` to limit analyzed commits per PR.
