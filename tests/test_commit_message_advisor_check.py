@@ -3,18 +3,18 @@ import json
 from checks import commit_message_advisor_check as advisor
 
 
-def test_run_uses_fallback_without_api_key(monkeypatch):
+def test_run_returns_error_without_api_key(monkeypatch):
     monkeypatch.setattr(advisor, "OPENAI_API_KEY", "")
 
     result = advisor.run("PR", [{"commit": {"message": "Обновить docker-bake.hcl"}}], "")
 
     assert result["feature"] == advisor.FEATURE_KEY
     assert result["is_advisory"] is True
-    assert "Update docker-bake.hcl" in result["comment"]
+    assert "OPENAI_API_KEY is not configured" in result["comment"]
     assert result["has_violations"] is True
 
 
-def test_run_uses_fallback_on_api_error(monkeypatch):
+def test_run_returns_error_on_api_error(monkeypatch):
     monkeypatch.setattr(advisor, "OPENAI_API_KEY", "token")
     monkeypatch.setattr(
         advisor,
@@ -25,7 +25,7 @@ def test_run_uses_fallback_on_api_error(monkeypatch):
     result = advisor.run("PR", [{"commit": {"message": "fixed bug"}}], "")
 
     assert result["is_advisory"] is True
-    assert "Update changes" in result["comment"]
+    assert "request failed with status 503" in result["comment"]
     assert result["has_violations"] is True
 
 

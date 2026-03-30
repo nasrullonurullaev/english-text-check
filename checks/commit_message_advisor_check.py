@@ -1,6 +1,5 @@
 import json
 import os
-import re
 import urllib.error
 import urllib.request
 
@@ -11,7 +10,6 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
 ADVISOR_MODEL = os.getenv("COMMIT_MESSAGE_ADVISOR_MODEL", "gpt-4o-mini")
 MAX_COMMITS = int(os.getenv("COMMIT_MESSAGE_ADVISOR_MAX_COMMITS", "20"))
-NON_ASCII_RE = re.compile(r"[^\x00-\x7F]")
 
 def _extract_commit_subjects(commits):
     result = []
@@ -118,46 +116,6 @@ def _build_advisory_comment(analysis_items):
     return "\n".join(lines)
 
 
-def _fallback_analysis(items):
-    analysis = []
-    for item in items:
-        subject = item.get("subject", "")
-        has_non_ascii = bool(NON_ASCII_RE.search(subject))
-        is_short = len(subject) <= 50
-        starts_capital = bool(subject[:1].isupper())
-        no_dot = not subject.endswith(".")
-
-        if not has_non_ascii and is_short and starts_capital and no_dot:
-            analysis.append(
-                {
-                    "subject": subject,
-                    "verdict": "ok",
-                    "suggested_subject": "",
-                    "reason": "",
-                }
-            )
-            continue
-
-        suggested = "Update changes"
-        if "docker-bake.hcl" in subject.lower():
-            suggested = "Update docker-bake.hcl"
-
-        reason = "Use English and imperative mood in the subject line."
-        if not is_short:
-            reason = "Use English, imperative mood, and keep subject <= 50 chars."
-
-        analysis.append(
-            {
-                "subject": subject,
-                "verdict": "rewrite",
-                "suggested_subject": suggested,
-                "reason": reason,
-            }
-        )
-
-    return analysis
-
-
 def run(pr_title, commits, diff_text):
     del diff_text
 
@@ -174,6 +132,10 @@ def run(pr_title, commits, diff_text):
         }
 
     analysis_items = []
+    advisor_error = ""
+    if not OPENAI_API_KEY:
+        advisor_error = "⚠️ Commit advisor error: OPENAI_API_KEY is not configured."
+
     if OPENAI_API_KEY:
         payload = {
             "model": ADVISOR_MODEL,
@@ -211,18 +173,21 @@ def run(pr_title, commits, diff_text):
             )
             if isinstance(candidate, list):
                 analysis_items = candidate
-
-    if not analysis_items:
-        analysis_items = _fallback_analysis(items)
+            else:
+                advisor_error = "⚠️ Commit advisor error: model returned invalid JSON format."
+        else:
+            advisor_error = "⚠️ Commit advisor error: request failed with status {0}.".format(status)
 
     comment = _build_advisory_comment(analysis_items)
+    if advisor_error:
+        comment = (comment + "\n\n" if comment else "") + advisor_error
 
     return {
         "feature": FEATURE_KEY,
         "title_violations": [],
         "commit_violations": analysis_items,
         "comment_violations": [],
-        "has_violations": bool(analysis_items),
+        "has_violations": bool(analysis_items or advisor_error),
         "comment": comment,
         "is_advisory": True,
     }
