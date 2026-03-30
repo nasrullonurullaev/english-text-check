@@ -6,12 +6,6 @@ import urllib.request
 
 FEATURE_KEY = "commit_message_advisor"
 
-ADVISOR_ENABLED = os.getenv("COMMIT_MESSAGE_ADVISOR_ENABLED", "").lower() in {
-    "1",
-    "true",
-    "yes",
-    "on",
-}
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
 ADVISOR_MODEL = os.getenv("COMMIT_MESSAGE_ADVISOR_MODEL", "gpt-4o-mini")
@@ -129,12 +123,6 @@ def _build_advisory_comment(analysis_items):
     return "\n".join(lines)
 
 
-def _is_enabled():
-    if ADVISOR_ENABLED:
-        return True
-    return bool(OPENAI_API_KEY)
-
-
 def _heuristic_analysis(commits):
     analysis = []
 
@@ -191,17 +179,6 @@ def _heuristic_analysis(commits):
 
 def run(pr_title, commits, diff_text):
     del diff_text
-
-    if not _is_enabled():
-        return {
-            "feature": FEATURE_KEY,
-            "title_violations": [],
-            "commit_violations": [],
-            "comment_violations": [],
-            "has_violations": False,
-            "comment": "",
-            "is_advisory": True,
-        }
 
     items = _extract_commit_subjects(commits)
     if not items:

@@ -31,9 +31,7 @@ so the PR still receives recommendations.
 
 Environment variables:
 
-- `COMMIT_MESSAGE_ADVISOR_ENABLED=true` to force-enable advisor mode.
 - `OPENAI_API_KEY=<your token>` to authenticate with the model provider.
-- Advisor is also auto-enabled when `OPENAI_API_KEY` is set.
 - `COMMIT_MESSAGE_ADVISOR_MODEL=gpt-4o-mini` (default) for a fast/cheap model.
 - `OPENAI_BASE_URL=https://api.openai.com/v1` for OpenAI-compatible endpoints.
 - `COMMIT_MESSAGE_ADVISOR_MAX_COMMITS=20` to limit analyzed commits per PR.

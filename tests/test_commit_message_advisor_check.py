@@ -3,32 +3,19 @@ import json
 from checks import commit_message_advisor_check as advisor
 
 
-def test_run_returns_empty_when_disabled(monkeypatch):
-    monkeypatch.setattr(advisor, "ADVISOR_ENABLED", False)
-    monkeypatch.setattr(advisor, "OPENAI_API_KEY", "")
-
-    result = advisor.run("PR", [{"commit": {"message": "Fix bug"}}], "")
-
-    assert result["feature"] == advisor.FEATURE_KEY
-    assert result["is_advisory"] is True
-    assert result["has_violations"] is False
-    assert result["comment"] == ""
-
-
-def test_run_uses_heuristics_when_enabled_without_api_key(monkeypatch):
-    monkeypatch.setattr(advisor, "ADVISOR_ENABLED", True)
+def test_run_uses_heuristics_without_api_key(monkeypatch):
     monkeypatch.setattr(advisor, "OPENAI_API_KEY", "")
 
     result = advisor.run("PR", [{"commit": {"message": "fixed bug"}}], "")
 
+    assert result["feature"] == advisor.FEATURE_KEY
+    assert result["is_advisory"] is True
     assert "recommendations" in result["comment"]
     assert "imperative mood" in result["comment"]
-    assert result["is_advisory"] is True
     assert result["has_violations"] is True
 
 
-def test_run_auto_enables_when_api_key_exists(monkeypatch):
-    monkeypatch.setattr(advisor, "ADVISOR_ENABLED", False)
+def test_run_falls_back_to_heuristics_on_api_error(monkeypatch):
     monkeypatch.setattr(advisor, "OPENAI_API_KEY", "token")
     monkeypatch.setattr(
         advisor,
@@ -43,7 +30,6 @@ def test_run_auto_enables_when_api_key_exists(monkeypatch):
 
 
 def test_run_builds_comment_from_model_output(monkeypatch):
-    monkeypatch.setattr(advisor, "ADVISOR_ENABLED", True)
     monkeypatch.setattr(advisor, "OPENAI_API_KEY", "token")
 
     model_output = {
