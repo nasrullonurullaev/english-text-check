@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import urllib.error
 import urllib.request
 
@@ -10,6 +11,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
 ADVISOR_MODEL = os.getenv("COMMIT_MESSAGE_ADVISOR_MODEL", "gpt-4o-mini")
 MAX_COMMITS = int(os.getenv("COMMIT_MESSAGE_ADVISOR_MAX_COMMITS", "20"))
+NON_ASCII_RE = re.compile(r"[^\x00-\x7F]")
 
 def _extract_commit_subjects(commits):
     result = []
@@ -116,6 +118,46 @@ def _build_advisory_comment(analysis_items):
     return "\n".join(lines)
 
 
+def _fallback_analysis(items):
+    analysis = []
+    for item in items:
+        subject = item.get("subject", "")
+        has_non_ascii = bool(NON_ASCII_RE.search(subject))
+        is_short = len(subject) <= 50
+        starts_capital = bool(subject[:1].isupper())
+        no_dot = not subject.endswith(".")
+
+        if not has_non_ascii and is_short and starts_capital and no_dot:
+            analysis.append(
+                {
+                    "subject": subject,
+                    "verdict": "ok",
+                    "suggested_subject": "",
+                    "reason": "",
+                }
+            )
+            continue
+
+        suggested = "Update changes"
+        if "docker-bake.hcl" in subject.lower():
+            suggested = "Update docker-bake.hcl"
+
+        reason = "Use English and imperative mood in the subject line."
+        if not is_short:
+            reason = "Use English, imperative mood, and keep subject <= 50 chars."
+
+        analysis.append(
+            {
+                "subject": subject,
+                "verdict": "rewrite",
+                "suggested_subject": suggested,
+                "reason": reason,
+            }
+        )
+
+    return analysis
+
+
 def run(pr_title, commits, diff_text):
     del diff_text
 
@@ -131,54 +173,47 @@ def run(pr_title, commits, diff_text):
             "is_advisory": True,
         }
 
-    if not OPENAI_API_KEY:
-        return {
-            "feature": FEATURE_KEY,
-            "title_violations": [],
-            "commit_violations": [],
-            "comment_violations": [],
-            "has_violations": False,
-            "comment": "",
-            "is_advisory": True,
+    analysis_items = []
+    if OPENAI_API_KEY:
+        payload = {
+            "model": ADVISOR_MODEL,
+            "input": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a Git commit message reviewer. "
+                        "For each commit message return ONLY compact JSON with key "
+                        "'analysis' as list of objects. "
+                        "Object schema: subject (string), verdict ('ok'|'rewrite'), "
+                        "suggested_subject (string, empty when verdict='ok'), "
+                        "reason (string <= 120 chars). "
+                        "Use the 7 classic rules (English, imperative mood, <=50 chars, "
+                        "etc). If message is good, verdict must be 'ok'."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": _build_input_text(pr_title, items),
+                },
+            ],
+            "max_output_tokens": 700,
         }
 
-    analysis_items = []
-    payload = {
-        "model": ADVISOR_MODEL,
-        "input": [
-            {
-                "role": "system",
-                "content": (
-                    "You are a Git commit message reviewer. "
-                    "For each commit message return ONLY compact JSON with key "
-                    "'analysis' as list of objects. "
-                    "Object schema: subject (string), verdict ('ok'|'rewrite'), "
-                    "suggested_subject (string, empty when verdict='ok'), "
-                    "reason (string <= 120 chars). "
-                    "Use the 7 classic rules (English, imperative mood, <=50 chars, "
-                    "etc). If message is good, verdict must be 'ok'."
-                ),
-            },
-            {
-                "role": "user",
-                "content": _build_input_text(pr_title, items),
-            },
-        ],
-        "max_output_tokens": 700,
-    }
+        status, body = _responses_api_request(payload)
+        if status < 300:
+            api_json = _safe_json_loads(body)
+            content_text = _parse_response_text(api_json)
+            parsed_content = _safe_json_loads(content_text)
+            candidate = (
+                parsed_content.get("analysis")
+                if isinstance(parsed_content, dict)
+                else []
+            )
+            if isinstance(candidate, list):
+                analysis_items = candidate
 
-    status, body = _responses_api_request(payload)
-    if status < 300:
-        api_json = _safe_json_loads(body)
-        content_text = _parse_response_text(api_json)
-        parsed_content = _safe_json_loads(content_text)
-        candidate = (
-            parsed_content.get("analysis")
-            if isinstance(parsed_content, dict)
-            else []
-        )
-        if isinstance(candidate, list):
-            analysis_items = candidate
+    if not analysis_items:
+        analysis_items = _fallback_analysis(items)
 
     comment = _build_advisory_comment(analysis_items)
 

@@ -26,8 +26,8 @@ Tests run automatically on every pull request via GitHub Actions (`.github/workf
 The advisor checks commit messages against the classic 7 rules (subject/body
 split, subject length, imperative mood, etc.) and posts suggestions as a PR
 comment. It **never fails** the status check by itself.
-If `OPENAI_API_KEY` is not configured (or API call fails), advisor output is
-silently skipped.
+If `OPENAI_API_KEY` is not configured (or API call fails), it falls back to a
+simple local recommendation (`suggested subject` or `OK`).
 
 Environment variables:
 
