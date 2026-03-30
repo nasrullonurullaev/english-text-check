@@ -6,7 +6,7 @@ import urllib.request
 
 FEATURE_KEY = "commit_message_advisor"
 
-ADVISOR_ENABLED = os.getenv("COMMIT_MESSAGE_ADVISOR_ENABLED", "false").lower() in {
+ADVISOR_ENABLED = os.getenv("COMMIT_MESSAGE_ADVISOR_ENABLED", "").lower() in {
     "1",
     "true",
     "yes",
@@ -16,6 +16,15 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
 ADVISOR_MODEL = os.getenv("COMMIT_MESSAGE_ADVISOR_MODEL", "gpt-4o-mini")
 MAX_COMMITS = int(os.getenv("COMMIT_MESSAGE_ADVISOR_MAX_COMMITS", "20"))
+
+COMMON_NON_IMPERATIVE_STARTS = (
+    "added",
+    "fixed",
+    "changed",
+    "updated",
+    "removed",
+    "refactored",
+)
 
 
 def _extract_commit_subjects(commits):
@@ -28,7 +37,13 @@ def _extract_commit_subjects(commits):
         lines = message.splitlines()
         subject = lines[0].strip()
         body = "\n".join(lines[1:]).strip()
-        result.append({"subject": subject, "body": body})
+        result.append(
+            {
+                "subject": subject,
+                "body": body,
+                "raw_message": message,
+            }
+        )
     return result
 
 
@@ -114,10 +129,70 @@ def _build_advisory_comment(analysis_items):
     return "\n".join(lines)
 
 
+def _is_enabled():
+    if ADVISOR_ENABLED:
+        return True
+    return bool(OPENAI_API_KEY)
+
+
+def _heuristic_analysis(commits):
+    analysis = []
+
+    for item in commits:
+        subject = item["subject"]
+        body = item["body"]
+        suggestions = []
+
+        if len(subject) > 50:
+            suggestions.append("Keep the subject line at 50 characters or less.")
+
+        if subject and not subject[0].isupper():
+            suggestions.append("Capitalize the first letter in the subject line.")
+
+        if subject.endswith("."):
+            suggestions.append("Do not end the subject line with a period.")
+
+        lowered = subject.lower().strip()
+        if lowered.startswith(COMMON_NON_IMPERATIVE_STARTS):
+            suggestions.append(
+                "Prefer imperative mood in subject (e.g. 'Fix', 'Add', 'Update')."
+            )
+
+        if body and "\n\n" not in item.get("raw_message", ""):
+            suggestions.append("Separate subject and body with a blank line.")
+
+        if body:
+            long_lines = [line for line in body.splitlines() if len(line) > 72]
+            if long_lines:
+                suggestions.append("Wrap body lines at about 72 characters.")
+
+        if not body:
+            suggestions.append(
+                "Add a short body explaining what changed and why (non-blocking tip)."
+            )
+
+        summary = (
+            "Looks good."
+            if not suggestions
+            else "Can be improved to better match commit message conventions."
+        )
+        score = max(0, 100 - len(suggestions) * 15)
+        analysis.append(
+            {
+                "subject": subject,
+                "score": score,
+                "summary": summary,
+                "suggestions": suggestions,
+            }
+        )
+
+    return analysis
+
+
 def run(pr_title, commits, diff_text):
     del diff_text
 
-    if not ADVISOR_ENABLED:
+    if not _is_enabled():
         return {
             "feature": FEATURE_KEY,
             "title_violations": [],
@@ -125,19 +200,6 @@ def run(pr_title, commits, diff_text):
             "comment_violations": [],
             "has_violations": False,
             "comment": "",
-            "is_advisory": True,
-        }
-
-    if not OPENAI_API_KEY:
-        return {
-            "feature": FEATURE_KEY,
-            "title_violations": [],
-            "commit_violations": [],
-            "comment_violations": [],
-            "has_violations": False,
-            "comment": (
-                "⚠️ Commit message advisor is enabled but OPENAI_API_KEY is missing."
-            ),
             "is_advisory": True,
         }
 
@@ -153,53 +215,48 @@ def run(pr_title, commits, diff_text):
             "is_advisory": True,
         }
 
-    payload = {
-        "model": ADVISOR_MODEL,
-        "input": [
-            {
-                "role": "system",
-                "content": (
-                    "You are a Git commit message reviewer. "
-                    "Evaluate each commit message against the 7 rules: "
-                    "blank line between subject and body, <=50 char subject, "
-                    "capitalize subject, no trailing period in subject, "
-                    "imperative mood, body wrapped around 72 chars, "
-                    "body explains what/why more than how. "
-                    "Return strict JSON with key 'analysis' as a list of items. "
-                    "Each item must have: subject (string), score (0-100 integer), "
-                    "summary (string), suggestions (array of short strings)."
-                ),
-            },
-            {
-                "role": "user",
-                "content": _build_input_text(pr_title, items),
-            },
-        ],
-        "max_output_tokens": 900,
-    }
-
-    status, body = _responses_api_request(payload)
-    if status >= 300:
-        return {
-            "feature": FEATURE_KEY,
-            "title_violations": [],
-            "commit_violations": [],
-            "comment_violations": [],
-            "has_violations": False,
-            "comment": (
-                "⚠️ Commit message advisor request failed: status={0}. "
-                "Check model, token, and endpoint settings."
-            ).format(status),
-            "is_advisory": True,
+    analysis_items = []
+    if OPENAI_API_KEY:
+        payload = {
+            "model": ADVISOR_MODEL,
+            "input": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a Git commit message reviewer. "
+                        "Evaluate each commit message against the 7 rules: "
+                        "blank line between subject and body, <=50 char subject, "
+                        "capitalize subject, no trailing period in subject, "
+                        "imperative mood, body wrapped around 72 chars, "
+                        "body explains what/why more than how. "
+                        "Return strict JSON with key 'analysis' as a list of items. "
+                        "Each item must have: subject (string), score (0-100 integer), "
+                        "summary (string), suggestions (array of short strings)."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": _build_input_text(pr_title, items),
+                },
+            ],
+            "max_output_tokens": 900,
         }
 
-    api_json = _safe_json_loads(body)
-    content_text = _parse_response_text(api_json)
-    parsed_content = _safe_json_loads(content_text)
-    analysis_items = parsed_content.get("analysis") if isinstance(parsed_content, dict) else []
+        status, body = _responses_api_request(payload)
+        if status < 300:
+            api_json = _safe_json_loads(body)
+            content_text = _parse_response_text(api_json)
+            parsed_content = _safe_json_loads(content_text)
+            candidate = (
+                parsed_content.get("analysis")
+                if isinstance(parsed_content, dict)
+                else []
+            )
+            if isinstance(candidate, list):
+                analysis_items = candidate
 
-    if not isinstance(analysis_items, list):
-        analysis_items = []
+    if not analysis_items:
+        analysis_items = _heuristic_analysis(items)
 
     comment = _build_advisory_comment(analysis_items)
 
