@@ -4,7 +4,7 @@ import unicodedata
 EXCLUDED_FILES = {".json", ".p7s", ".cjs", ".po", ".license", ".xml", ".md",".htm",".resx"}
 COMMENT_REGEX = re.compile(r"(?://|#|<!--|/\*|\*).+")
 QUOTED_TEXT_REGEX = re.compile(r'(".*?"|\'.*?\')')
-ALLOWED_SYMBOLS = {'↓', '↑', '←', '→', '⌘', '⌥', '©', '•', '—', '─'}
+ALLOWED_SYMBOLS = {'↓', '↑', '←', '→', '⌘', '⌥', '©', '•', '—', '─', '⇧'}
 
 
 FEATURE_KEY = "english_text"
