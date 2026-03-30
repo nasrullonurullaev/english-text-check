@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import urllib.error
 import urllib.request
 
@@ -10,6 +11,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
 ADVISOR_MODEL = os.getenv("COMMIT_MESSAGE_ADVISOR_MODEL", "gpt-4o-mini")
 MAX_COMMITS = int(os.getenv("COMMIT_MESSAGE_ADVISOR_MAX_COMMITS", "20"))
+JSON_BLOCK_RE = re.compile(r"\{.*\}", re.DOTALL)
 
 def _extract_commit_subjects(commits):
     result = []
@@ -85,6 +87,22 @@ def _safe_json_loads(text):
         return json.loads(text)
     except Exception:
         return {}
+
+
+def _safe_parse_analysis_payload(text):
+    parsed = _safe_json_loads(text)
+    if isinstance(parsed, dict) and isinstance(parsed.get("analysis"), list):
+        return parsed
+
+    # Some models return markdown-wrapped or prefixed text. Try extracting
+    # the first JSON object from the output.
+    match = JSON_BLOCK_RE.search(text or "")
+    if match:
+        parsed = _safe_json_loads(match.group(0))
+        if isinstance(parsed, dict) and isinstance(parsed.get("analysis"), list):
+            return parsed
+
+    return {}
 
 
 def _build_advisory_comment(analysis_items):
@@ -165,7 +183,7 @@ def run(pr_title, commits, diff_text):
         if status < 300:
             api_json = _safe_json_loads(body)
             content_text = _parse_response_text(api_json)
-            parsed_content = _safe_json_loads(content_text)
+            parsed_content = _safe_parse_analysis_payload(content_text)
             candidate = (
                 parsed_content.get("analysis")
                 if isinstance(parsed_content, dict)

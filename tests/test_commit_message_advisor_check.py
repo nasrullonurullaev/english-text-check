@@ -69,3 +69,37 @@ def test_run_builds_comment_from_model_output(monkeypatch):
     assert result["is_advisory"] is True
     assert "non-blocking" in result["comment"]
     assert "Fix stuff" in result["comment"]
+
+
+def test_run_parses_markdown_wrapped_json(monkeypatch):
+    monkeypatch.setattr(advisor, "OPENAI_API_KEY", "token")
+
+    wrapped = {
+        "output": [
+            {
+                "content": [
+                    {
+                        "type": "output_text",
+                        "text": (
+                            "Here is the result:\n```json\n"
+                            "{\"analysis\":[{\"subject\":\"Update docker-bake.hcl\","
+                            "\"verdict\":\"ok\",\"suggested_subject\":\"\",\"reason\":\"\"}]}\n"
+                            "```"
+                        ),
+                    }
+                ]
+            }
+        ]
+    }
+
+    monkeypatch.setattr(
+        advisor,
+        "_responses_api_request",
+        lambda payload: (200, json.dumps(wrapped)),
+    )
+
+    commits = [{"commit": {"message": "Update docker-bake.hcl"}}]
+    result = advisor.run("Improve checks", commits, "")
+
+    assert result["has_violations"] is True
+    assert "✅ OK" in result["comment"]
