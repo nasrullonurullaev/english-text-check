@@ -23,3 +23,9 @@ def test_parse_response_limits_suggestions():
 
     assert overall == "Needs minor polishing"
     assert suggestions == ["A", "B", "C"]
+
+
+def test_build_prompt_includes_json_schema_literal_braces():
+    prompt = cma.build_prompt("Fix parser", ["Add tests"])
+    assert '"overall_assessment"' in prompt
+    assert '"suggestions"' in prompt

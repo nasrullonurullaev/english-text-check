@@ -45,10 +45,10 @@ def build_prompt(pr_title, commit_subjects):
         "Respond in English, concise and friendly.\n"
         "If the messages are already good, explicitly say that no changes are required.\n\n"
         "Output JSON with this schema:\n"
-        "{\n"
+        "{{\n"
         '  "overall_assessment": "short sentence",\n'
         '  "suggestions": ["1-3 concise suggestions, or empty if no changes required"]\n'
-        "}\n\n"
+        "}}\n\n"
         "Rules to evaluate:\n{rules}\n\n"
         "PR title:\n{title}\n\n"
         "Commit subjects:\n{commits}\n"
