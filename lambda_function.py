@@ -321,17 +321,23 @@ def lambda_handler(event, context):
             print("DEBUG commit check skipped:", str(e))
             commits = []
 
-        check_results = run_enabled_checks(pr_title=pr_title, commits=commits, diff_text=diff_text)
-        english_result = aggregate_english_result(check_results)
-        commit_advice_result = aggregate_result_by_feature(
-            check_results,
-            commit_message_advice.FEATURE_KEY,
+        english_result = normalize_check_result(
+            english_text_check.run(pr_title=pr_title, commits=commits, diff_text=diff_text)
         )
+
+        commit_advice_result = {
+            "comment": "",
+        }
 
         title_violations = english_result["title_violations"]
         commit_violations = english_result["commit_violations"]
         comment_violations = english_result["comment_violations"]
         has_violations = english_result["has_violations"]
+
+        if not has_violations:
+            commit_advice_result = normalize_check_result(
+                commit_message_advice.run(pr_title=pr_title, commits=commits, diff_text=diff_text)
+            )
 
         if commit_advice_result["comment"]:
             advice_status, advice_body, _ = post_pr_comment(

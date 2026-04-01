@@ -190,26 +190,28 @@ def test_lambda_handler_posts_commit_advice_comment(monkeypatch):
     monkeypatch.setattr(lf, "fetch_pr_commits", lambda owner, repo, pr_number: [])
 
     monkeypatch.setattr(
-        lf,
-        "run_enabled_checks",
-        lambda **kwargs: [
-            {
-                "feature": "english_text",
-                "title_violations": [],
-                "commit_violations": [],
-                "comment_violations": [],
-                "has_violations": False,
-                "comment": "",
-            },
-            {
-                "feature": "commit_message_advice",
-                "title_violations": [],
-                "commit_violations": [],
-                "comment_violations": [],
-                "has_violations": True,
-                "comment": "Advice comment",
-            },
-        ],
+        lf.english_text_check,
+        "run",
+        lambda **kwargs: {
+            "feature": "english_text",
+            "title_violations": [],
+            "commit_violations": [],
+            "comment_violations": [],
+            "has_violations": False,
+            "comment": "",
+        },
+    )
+    monkeypatch.setattr(
+        lf.commit_message_advice,
+        "run",
+        lambda **kwargs: {
+            "feature": "commit_message_advice",
+            "title_violations": [],
+            "commit_violations": [],
+            "comment_violations": [],
+            "has_violations": True,
+            "comment": "Advice comment",
+        },
     )
 
     result = lf.lambda_handler(event, None)
@@ -219,4 +221,84 @@ def test_lambda_handler_posts_commit_advice_comment(monkeypatch):
     assert body["ok"] is True
     assert body["status_state"] == "success"
     assert len(status_calls) == 2
+    assert len(comment_calls) == 1
+
+
+def test_lambda_handler_skips_advice_when_english_check_fails(monkeypatch):
+    monkeypatch.setattr(lf, "GITEA_BASE_URL", "https://example.com")
+    monkeypatch.setattr(lf, "GITEA_TOKEN", "token")
+    monkeypatch.setattr(lf, "WEBHOOK_SECRET", "secret")
+    monkeypatch.setattr(lf, "ORG_NAME", "ONLYOFFICE")
+
+    payload = {
+        "action": "opened",
+        "number": 44,
+        "repository": {"name": "repo", "owner": {"login": "ONLYOFFICE"}},
+        "pull_request": {
+            "number": 44,
+            "title": "bad title",
+            "html_url": "https://example.com/pr/44",
+            "head": {"sha": "ghi789"},
+            "base": {"repo": {"owner": {"login": "ONLYOFFICE"}}},
+        },
+    }
+    body_text = json.dumps(payload)
+    digest = hmac.new(b"secret", body_text.encode("utf-8"), hashlib.sha256).hexdigest()
+
+    event = {
+        "headers": {
+            "X-Gitea-Event": "pull_request",
+            "X-Gitea-Signature": digest,
+        },
+        "body": body_text,
+        "isBase64Encoded": False,
+    }
+
+    comment_calls = []
+
+    def fake_post_pr_comment(*args, **kwargs):
+        comment_calls.append((args, kwargs))
+        return 201, "{}", {}
+
+    monkeypatch.setattr(lf, "set_commit_status", lambda *args, **kwargs: (201, "{}", {}))
+    monkeypatch.setattr(lf, "post_pr_comment", fake_post_pr_comment)
+    monkeypatch.setattr(
+        lf,
+        "fetch_pr_diff",
+        lambda owner, repo, pr_number: "diff --git a/a b/a\n+++ b/a\n+# Привет",
+    )
+    monkeypatch.setattr(lf, "fetch_pr_commits", lambda owner, repo, pr_number: [])
+
+    monkeypatch.setattr(
+        lf.english_text_check,
+        "run",
+        lambda **kwargs: {
+            "feature": "english_text",
+            "title_violations": [{"type": "pr_title", "content": "bad"}],
+            "commit_violations": [],
+            "comment_violations": [],
+            "has_violations": True,
+            "comment": "English violation comment",
+        },
+    )
+
+    advice_called = {"value": False}
+
+    def fake_advice_run(**kwargs):
+        advice_called["value"] = True
+        return {
+            "feature": "commit_message_advice",
+            "title_violations": [],
+            "commit_violations": [],
+            "comment_violations": [],
+            "has_violations": True,
+            "comment": "Advice comment",
+        }
+
+    monkeypatch.setattr(lf.commit_message_advice, "run", fake_advice_run)
+
+    result = lf.lambda_handler(event, None)
+
+    assert result["statusCode"] == 200
+    assert advice_called["value"] is False
     assert len(comment_calls) == 1
