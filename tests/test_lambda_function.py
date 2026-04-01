@@ -224,7 +224,7 @@ def test_lambda_handler_posts_commit_advice_comment(monkeypatch):
     assert len(comment_calls) == 1
 
 
-def test_lambda_handler_skips_advice_when_english_check_fails(monkeypatch):
+def test_lambda_handler_posts_advice_when_english_check_fails(monkeypatch):
     monkeypatch.setattr(lf, "GITEA_BASE_URL", "https://example.com")
     monkeypatch.setattr(lf, "GITEA_TOKEN", "token")
     monkeypatch.setattr(lf, "WEBHOOK_SECRET", "secret")
@@ -300,5 +300,5 @@ def test_lambda_handler_skips_advice_when_english_check_fails(monkeypatch):
     result = lf.lambda_handler(event, None)
 
     assert result["statusCode"] == 200
-    assert advice_called["value"] is False
-    assert len(comment_calls) == 1
+    assert advice_called["value"] is True
+    assert len(comment_calls) == 2

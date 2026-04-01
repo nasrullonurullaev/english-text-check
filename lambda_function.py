@@ -334,10 +334,9 @@ def lambda_handler(event, context):
         comment_violations = english_result["comment_violations"]
         has_violations = english_result["has_violations"]
 
-        if not has_violations:
-            commit_advice_result = normalize_check_result(
-                commit_message_advice.run(pr_title=pr_title, commits=commits, diff_text=diff_text)
-            )
+        commit_advice_result = normalize_check_result(
+            commit_message_advice.run(pr_title=pr_title, commits=commits, diff_text=diff_text)
+        )
 
         if commit_advice_result["comment"]:
             advice_status, advice_body, _ = post_pr_comment(
