@@ -7,6 +7,7 @@ import urllib.request
 import urllib.error
 
 from checks import get_enabled_checks
+from checks import commit_message_advice
 from checks import english_text_check
 
 
@@ -225,9 +226,9 @@ def run_enabled_checks(pr_title, commits, diff_text):
     return results
 
 
-def aggregate_english_result(check_results):
+def aggregate_result_by_feature(check_results, feature_key):
     for result in check_results:
-        if result.get("feature") == english_text_check.FEATURE_KEY:
+        if result.get("feature") == feature_key:
             return result
 
     return {
@@ -237,6 +238,10 @@ def aggregate_english_result(check_results):
         "has_violations": False,
         "comment": "",
     }
+
+
+def aggregate_english_result(check_results):
+    return aggregate_result_by_feature(check_results, english_text_check.FEATURE_KEY)
 
 
 # Backward-compatible exports used by tests and existing integrations.
@@ -318,11 +323,31 @@ def lambda_handler(event, context):
 
         check_results = run_enabled_checks(pr_title=pr_title, commits=commits, diff_text=diff_text)
         english_result = aggregate_english_result(check_results)
+        commit_advice_result = aggregate_result_by_feature(
+            check_results,
+            commit_message_advice.FEATURE_KEY,
+        )
 
         title_violations = english_result["title_violations"]
         commit_violations = english_result["commit_violations"]
         comment_violations = english_result["comment_violations"]
         has_violations = english_result["has_violations"]
+
+        if commit_advice_result["comment"]:
+            advice_status, advice_body, _ = post_pr_comment(
+                repo_owner,
+                repo_name,
+                int(pr_number),
+                commit_advice_result["comment"],
+            )
+
+            if advice_status >= 300:
+                return response(502, {
+                    "ok": False,
+                    "error": "failed to post advice comment",
+                    "gitea_status": advice_status,
+                    "gitea_body": advice_body[:2000],
+                })
 
         if has_violations:
             comment_status, comment_body, _ = post_pr_comment(

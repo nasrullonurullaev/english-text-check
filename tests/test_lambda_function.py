@@ -136,3 +136,87 @@ def test_aggregate_english_result_fallback():
     assert result["comment_violations"] == []
     assert result["has_violations"] is False
     assert result["comment"] == ""
+
+
+def test_lambda_handler_posts_commit_advice_comment(monkeypatch):
+    monkeypatch.setattr(lf, "GITEA_BASE_URL", "https://example.com")
+    monkeypatch.setattr(lf, "GITEA_TOKEN", "token")
+    monkeypatch.setattr(lf, "WEBHOOK_SECRET", "secret")
+    monkeypatch.setattr(lf, "ORG_NAME", "ONLYOFFICE")
+
+    payload = {
+        "action": "opened",
+        "number": 43,
+        "repository": {"name": "repo", "owner": {"login": "ONLYOFFICE"}},
+        "pull_request": {
+            "number": 43,
+            "title": "fix parser",
+            "html_url": "https://example.com/pr/43",
+            "head": {"sha": "def456"},
+            "base": {"repo": {"owner": {"login": "ONLYOFFICE"}}},
+        },
+    }
+    body_text = json.dumps(payload)
+    raw_body = body_text.encode("utf-8")
+    digest = hmac.new(b"secret", raw_body, hashlib.sha256).hexdigest()
+
+    event = {
+        "headers": {
+            "X-Gitea-Event": "pull_request",
+            "X-Gitea-Signature": digest,
+        },
+        "body": body_text,
+        "isBase64Encoded": False,
+    }
+
+    status_calls = []
+    comment_calls = []
+
+    def fake_set_commit_status(*args, **kwargs):
+        status_calls.append((args, kwargs))
+        return 201, "{}", {}
+
+    def fake_post_pr_comment(*args, **kwargs):
+        comment_calls.append((args, kwargs))
+        return 201, "{}", {}
+
+    monkeypatch.setattr(lf, "set_commit_status", fake_set_commit_status)
+    monkeypatch.setattr(lf, "post_pr_comment", fake_post_pr_comment)
+    monkeypatch.setattr(
+        lf,
+        "fetch_pr_diff",
+        lambda owner, repo, pr_number: "diff --git a/a b/a\n+++ b/a\n+// hello",
+    )
+    monkeypatch.setattr(lf, "fetch_pr_commits", lambda owner, repo, pr_number: [])
+
+    monkeypatch.setattr(
+        lf,
+        "run_enabled_checks",
+        lambda **kwargs: [
+            {
+                "feature": "english_text",
+                "title_violations": [],
+                "commit_violations": [],
+                "comment_violations": [],
+                "has_violations": False,
+                "comment": "",
+            },
+            {
+                "feature": "commit_message_advice",
+                "title_violations": [],
+                "commit_violations": [],
+                "comment_violations": [],
+                "has_violations": True,
+                "comment": "Advice comment",
+            },
+        ],
+    )
+
+    result = lf.lambda_handler(event, None)
+
+    assert result["statusCode"] == 200
+    body = json.loads(result["body"])
+    assert body["ok"] is True
+    assert body["status_state"] == "success"
+    assert len(status_calls) == 2
+    assert len(comment_calls) == 1
