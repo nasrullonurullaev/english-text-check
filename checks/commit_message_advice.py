@@ -8,6 +8,9 @@ FEATURE_KEY = "commit_message_advice"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-mini")
 OPENAI_API_URL = os.getenv("OPENAI_API_URL", "https://api.openai.com/v1/responses")
+OPENAI_TIMEOUT_SECONDS = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "4"))
+MAX_COMMIT_SUBJECTS = int(os.getenv("MAX_COMMIT_SUBJECTS", "20"))
+MAX_SUBJECT_LENGTH = int(os.getenv("MAX_SUBJECT_LENGTH", "120"))
 
 
 def extract_commit_subjects(commits):
@@ -20,7 +23,10 @@ def extract_commit_subjects(commits):
 
         first_line = message.splitlines()[0].strip()
         if first_line:
-            subjects.append(first_line)
+            subjects.append(first_line[:MAX_SUBJECT_LENGTH])
+
+        if len(subjects) >= MAX_COMMIT_SUBJECTS:
+            break
 
     return subjects
 
@@ -72,7 +78,7 @@ def call_openai(prompt):
         },
     )
 
-    with urllib.request.urlopen(req, timeout=20) as resp:
+    with urllib.request.urlopen(req, timeout=OPENAI_TIMEOUT_SECONDS) as resp:
         body = resp.read().decode("utf-8", errors="replace")
 
     data = json.loads(body)
@@ -148,7 +154,7 @@ def run(pr_title, commits, diff_text):
             "has_violations": bool(suggestions),
             "comment": build_comment(overall, suggestions),
         }
-    except (urllib.error.URLError, urllib.error.HTTPError, ValueError, json.JSONDecodeError):
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError, json.JSONDecodeError):
         return {
             "feature": FEATURE_KEY,
             "title_violations": [],

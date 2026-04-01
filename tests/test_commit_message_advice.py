@@ -29,3 +29,16 @@ def test_build_prompt_includes_json_schema_literal_braces():
     prompt = cma.build_prompt("Fix parser", ["Add tests"])
     assert '"overall_assessment"' in prompt
     assert '"suggestions"' in prompt
+
+
+def test_extract_commit_subjects_limits_number_and_length(monkeypatch):
+    monkeypatch.setattr(cma, "MAX_COMMIT_SUBJECTS", 2)
+    monkeypatch.setattr(cma, "MAX_SUBJECT_LENGTH", 5)
+
+    commits = [
+        {"commit": {"message": "First subject line"}},
+        {"commit": {"message": "Second subject line"}},
+        {"commit": {"message": "Third subject line"}},
+    ]
+
+    assert cma.extract_commit_subjects(commits) == ["First", "Secon"]
