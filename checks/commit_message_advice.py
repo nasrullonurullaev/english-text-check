@@ -8,7 +8,7 @@ FEATURE_KEY = "commit_message_advice"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-mini")
 OPENAI_API_URL = os.getenv("OPENAI_API_URL", "https://api.openai.com/v1/responses")
-OPENAI_TIMEOUT_SECONDS = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "4"))
+OPENAI_TIMEOUT_SECONDS = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "1"))
 MAX_COMMIT_SUBJECTS = int(os.getenv("MAX_COMMIT_SUBJECTS", "20"))
 MAX_SUBJECT_LENGTH = int(os.getenv("MAX_SUBJECT_LENGTH", "120"))
 
@@ -154,7 +154,7 @@ def run(pr_title, commits, diff_text):
             "has_violations": bool(suggestions),
             "comment": build_comment(overall, suggestions),
         }
-    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError, json.JSONDecodeError):
+    except Exception:
         return {
             "feature": FEATURE_KEY,
             "title_violations": [],

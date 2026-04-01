@@ -42,3 +42,14 @@ def test_extract_commit_subjects_limits_number_and_length(monkeypatch):
     ]
 
     assert cma.extract_commit_subjects(commits) == ["First", "Secon"]
+
+
+def test_run_returns_empty_comment_when_openai_call_fails(monkeypatch):
+    monkeypatch.setattr(cma, "OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(cma, "call_openai", lambda prompt: (_ for _ in ()).throw(RuntimeError("boom")))
+
+    result = cma.run(pr_title="Fix parser", commits=[], diff_text="")
+
+    assert result["feature"] == cma.FEATURE_KEY
+    assert result["has_violations"] is False
+    assert result["comment"] == ""
