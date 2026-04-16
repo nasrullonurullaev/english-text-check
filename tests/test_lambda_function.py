@@ -136,3 +136,31 @@ def test_aggregate_english_result_fallback():
     assert result["comment_violations"] == []
     assert result["has_violations"] is False
     assert result["comment"] == ""
+
+
+def test_aggregate_check_results_merges_comments_and_violations():
+    check_results = [
+        {
+            "feature": "english_text",
+            "title_violations": [{"type": "pr_title"}],
+            "commit_violations": [],
+            "comment_violations": [],
+            "has_violations": True,
+            "comment": "english issues",
+        },
+        {
+            "feature": "commit_message_quality",
+            "title_violations": [],
+            "commit_violations": [{"type": "commit_message_quality"}],
+            "comment_violations": [],
+            "has_violations": True,
+            "comment": "commit issues",
+        },
+    ]
+
+    result = lf.aggregate_check_results(check_results)
+
+    assert result["has_violations"] is True
+    assert len(result["title_violations"]) == 1
+    assert len(result["commit_violations"]) == 1
+    assert "---" in result["comment"]

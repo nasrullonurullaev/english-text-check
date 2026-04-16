@@ -239,6 +239,30 @@ def aggregate_english_result(check_results):
     }
 
 
+def aggregate_check_results(check_results):
+    title_violations = []
+    commit_violations = []
+    comment_violations = []
+    comments = []
+
+    for result in check_results:
+        title_violations.extend(result.get("title_violations") or [])
+        commit_violations.extend(result.get("commit_violations") or [])
+        comment_violations.extend(result.get("comment_violations") or [])
+
+        comment_text = str(result.get("comment") or "").strip()
+        if comment_text and result.get("has_violations"):
+            comments.append(comment_text)
+
+    return {
+        "title_violations": title_violations,
+        "commit_violations": commit_violations,
+        "comment_violations": comment_violations,
+        "has_violations": bool(title_violations or commit_violations or comment_violations),
+        "comment": "\n\n---\n\n".join(comments),
+    }
+
+
 # Backward-compatible exports used by tests and existing integrations.
 extract_non_ascii_comments = english_text_check.extract_non_ascii_comments
 extract_invalid_pr_title = english_text_check.extract_invalid_pr_title
@@ -317,19 +341,19 @@ def lambda_handler(event, context):
             commits = []
 
         check_results = run_enabled_checks(pr_title=pr_title, commits=commits, diff_text=diff_text)
-        english_result = aggregate_english_result(check_results)
+        aggregated_result = aggregate_check_results(check_results)
 
-        title_violations = english_result["title_violations"]
-        commit_violations = english_result["commit_violations"]
-        comment_violations = english_result["comment_violations"]
-        has_violations = english_result["has_violations"]
+        title_violations = aggregated_result["title_violations"]
+        commit_violations = aggregated_result["commit_violations"]
+        comment_violations = aggregated_result["comment_violations"]
+        has_violations = aggregated_result["has_violations"]
 
         if has_violations:
             comment_status, comment_body, _ = post_pr_comment(
                 repo_owner,
                 repo_name,
                 int(pr_number),
-                english_result["comment"],
+                aggregated_result["comment"],
             )
 
             if comment_status >= 300:
@@ -341,10 +365,10 @@ def lambda_handler(event, context):
                 })
 
             status_state = "failure"
-            status_description = "Non-English characters found"
+            status_description = "PR checks found violations"
         else:
             status_state = "success"
-            status_description = "English text check passed"
+            status_description = "PR checks passed"
 
         final_status, final_body, _ = set_commit_status(
             repo_owner,
