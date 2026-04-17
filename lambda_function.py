@@ -15,6 +15,9 @@ GITEA_TOKEN = os.getenv("GITEA_TOKEN", "")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
 ORG_NAME = os.getenv("ORG_NAME", "ONLYOFFICE")
 STATUS_CONTEXT = os.getenv("STATUS_CONTEXT", "English-Text-Check")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5")
+ENABLE_COMMIT_REVIEW = os.getenv("ENABLE_COMMIT_REVIEW", "true").lower() == "true"
 
 ALLOWED_ACTIONS = set(
     x.strip()
@@ -33,6 +36,72 @@ REQUIRED_CHECK_FIELDS = (
     "has_violations",
     "comment",
 )
+
+COMMIT_REVIEW_SYSTEM_PROMPT = """
+You are a strict Git commit message reviewer.
+
+Evaluate a git commit message against these 7 rules:
+
+1. Separate subject from body with a blank line
+2. Limit the subject line to 50 characters
+3. Capitalize the subject line
+4. Do not end the subject line with a period
+5. Use the imperative mood in the subject line
+6. Wrap the body at 72 characters
+7. Use the body to explain what and why vs. how
+
+Return ONLY valid JSON in this exact shape:
+
+{
+  "overall_pass": true,
+  "score": 0,
+  "subject": "",
+  "body_present": true,
+  "checks": [
+    {
+      "rule": "Separate subject from body with a blank line",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "rule": "Limit the subject line to 50 characters",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "rule": "Capitalize the subject line",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "rule": "Do not end the subject line with a period",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "rule": "Use the imperative mood in the subject line",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "rule": "Wrap the body at 72 characters",
+      "passed": true,
+      "details": ""
+    },
+    {
+      "rule": "Use the body to explain what and why vs. how",
+      "passed": true,
+      "details": ""
+    }
+  ],
+  "suggested_commit_message": "",
+  "summary": ""
+}
+
+Scoring:
+- score is from 0 to 7
+- overall_pass is true only if at least 6/7 pass and rule 5 is passed
+""".strip()
 
 
 def response(status_code, body):
@@ -108,6 +177,121 @@ def gitea_api_request(method, path, payload=None, accept="application/json"):
 
     url = GITEA_BASE_URL + path
     return http_request(method, url, payload=payload, accept=accept)
+
+
+def openai_review_request(message_text):
+    if not OPENAI_API_KEY:
+        return {
+            "overall_pass": True,
+            "score": 7,
+            "subject": "",
+            "body_present": bool(message_text.strip()),
+            "checks": [],
+            "suggested_commit_message": "",
+            "summary": "",
+        }
+
+    payload = {
+        "model": OPENAI_MODEL,
+        "input": [
+            {"role": "system", "content": COMMIT_REVIEW_SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": "Review this git commit message:\n\n{0}".format(message_text),
+            },
+        ],
+    }
+
+    data = json.dumps(payload).encode("utf-8")
+    headers = {
+        "Authorization": "Bearer " + OPENAI_API_KEY,
+        "Content-Type": "application/json",
+        "User-Agent": "gitea-english-text-check-lambda",
+    }
+    req = urllib.request.Request(
+        url="https://api.openai.com/v1/responses",
+        data=data,
+        headers=headers,
+        method="POST",
+    )
+
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        response_body = resp.read().decode("utf-8", errors="replace")
+
+    parsed = json.loads(response_body)
+    output_text = (parsed.get("output_text") or "").strip()
+    if not output_text:
+        return {
+            "overall_pass": False,
+            "score": 0,
+            "subject": "",
+            "body_present": False,
+            "checks": [],
+            "suggested_commit_message": "",
+            "summary": "Model did not return output_text",
+        }
+
+    try:
+        return json.loads(output_text)
+    except json.JSONDecodeError:
+        return {
+            "overall_pass": False,
+            "score": 0,
+            "subject": "",
+            "body_present": False,
+            "checks": [],
+            "suggested_commit_message": "",
+            "summary": "Model did not return valid JSON",
+            "raw_response": output_text,
+        }
+
+
+def extract_commit_messages(commits):
+    messages = []
+    for commit_item in commits:
+        try:
+            message = ((commit_item.get("commit") or {}).get("message")) or ""
+        except Exception:
+            message = ""
+
+        if message.strip():
+            messages.append(message)
+    return messages
+
+
+def build_commit_review_comment(pr_title, commits, reviewer=None):
+    if not ENABLE_COMMIT_REVIEW:
+        return ""
+
+    review_func = reviewer or openai_review_request
+    targets = [("PR title", pr_title)]
+
+    for idx, message in enumerate(extract_commit_messages(commits)[:10], start=1):
+        targets.append(("Commit #{0}".format(idx), message))
+
+    issues = []
+    for label, text in targets:
+        result = review_func(text)
+        if result.get("overall_pass"):
+            continue
+        issues.append({
+            "label": label,
+            "score": result.get("score", 0),
+            "summary": result.get("summary", "").strip(),
+            "suggestion": result.get("suggested_commit_message", "").strip(),
+        })
+
+    if not issues:
+        return ""
+
+    lines = ["📝 Commit message/title review suggestions\n"]
+    for item in issues:
+        lines.append("- **{0}**: score {1}/7".format(item["label"], item["score"]))
+        if item["summary"]:
+            lines.append("  - Summary: {0}".format(item["summary"]))
+        if item["suggestion"]:
+            lines.append("  - Suggested rewrite:\n\n```text\n{0}\n```".format(item["suggestion"]))
+    return "\n".join(lines)
 
 
 def post_pr_comment(owner, repo, pr_number, text):
@@ -318,6 +502,7 @@ def lambda_handler(event, context):
 
         check_results = run_enabled_checks(pr_title=pr_title, commits=commits, diff_text=diff_text)
         english_result = aggregate_english_result(check_results)
+        commit_review_comment = build_commit_review_comment(pr_title, commits)
 
         title_violations = english_result["title_violations"]
         commit_violations = english_result["commit_violations"]
@@ -345,6 +530,21 @@ def lambda_handler(event, context):
         else:
             status_state = "success"
             status_description = "English text check passed"
+
+        if commit_review_comment:
+            suggestion_status, suggestion_body, _ = post_pr_comment(
+                repo_owner,
+                repo_name,
+                int(pr_number),
+                commit_review_comment,
+            )
+            if suggestion_status >= 300:
+                return response(502, {
+                    "ok": False,
+                    "error": "failed to post commit review comment",
+                    "gitea_status": suggestion_status,
+                    "gitea_body": suggestion_body[:2000],
+                })
 
         final_status, final_body, _ = set_commit_status(
             repo_owner,

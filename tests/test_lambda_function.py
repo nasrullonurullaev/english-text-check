@@ -136,3 +136,47 @@ def test_aggregate_english_result_fallback():
     assert result["comment_violations"] == []
     assert result["has_violations"] is False
     assert result["comment"] == ""
+
+
+def test_extract_commit_messages_skips_invalid_items():
+    commits = [
+        {"commit": {"message": "Fix parser bug"}},
+        {"commit": {"message": ""}},
+        {"not_commit": True},
+    ]
+    assert lf.extract_commit_messages(commits) == ["Fix parser bug"]
+
+
+def test_build_commit_review_comment_empty_when_all_pass(monkeypatch):
+    monkeypatch.setattr(lf, "ENABLE_COMMIT_REVIEW", True)
+
+    def reviewer(_):
+        return {"overall_pass": True}
+
+    comment = lf.build_commit_review_comment(
+        pr_title="Fix API",
+        commits=[{"commit": {"message": "Update tests"}}],
+        reviewer=reviewer,
+    )
+    assert comment == ""
+
+
+def test_build_commit_review_comment_contains_suggestions(monkeypatch):
+    monkeypatch.setattr(lf, "ENABLE_COMMIT_REVIEW", True)
+
+    def reviewer(_):
+        return {
+            "overall_pass": False,
+            "score": 4,
+            "summary": "Subject is not imperative",
+            "suggested_commit_message": "Fix API timeout handling",
+        }
+
+    comment = lf.build_commit_review_comment(
+        pr_title="fixed api timeout.",
+        commits=[],
+        reviewer=reviewer,
+    )
+    assert "PR title" in comment
+    assert "score 4/7" in comment
+    assert "Fix API timeout handling" in comment
