@@ -1,4 +1,11 @@
+import os
+
 from checks import english_text_check
+from checks import pr_title_ai_review
+
+
+def _is_truthy(value):
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def get_enabled_checks():
@@ -15,5 +22,11 @@ def get_enabled_checks():
       - `comment_violations`: list
       - `has_violations`: bool
       - `comment`: str
+      - optional `always_comment`: bool
     """
-    return [english_text_check]
+    checks = [english_text_check]
+
+    if _is_truthy(os.getenv("ENABLE_PR_TITLE_AI_CHECK", "false")):
+        checks.append(pr_title_ai_review)
+
+    return checks

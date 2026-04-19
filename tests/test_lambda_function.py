@@ -136,3 +136,89 @@ def test_aggregate_english_result_fallback():
     assert result["comment_violations"] == []
     assert result["has_violations"] is False
     assert result["comment"] == ""
+
+
+def test_get_enabled_checks_includes_ai_when_enabled(monkeypatch):
+    monkeypatch.setenv("ENABLE_PR_TITLE_AI_CHECK", "true")
+
+    from checks import get_enabled_checks
+
+    features = {check.FEATURE_KEY for check in get_enabled_checks()}
+    assert "english_text" in features
+    assert "pr_title_ai_review" in features
+
+
+def test_lambda_handler_posts_non_blocking_check_comment(monkeypatch):
+    monkeypatch.setattr(lf, "GITEA_BASE_URL", "https://example.com")
+    monkeypatch.setattr(lf, "GITEA_TOKEN", "token")
+    monkeypatch.setattr(lf, "WEBHOOK_SECRET", "secret")
+    monkeypatch.setattr(lf, "ORG_NAME", "ONLYOFFICE")
+
+    payload = {
+        "action": "opened",
+        "number": 7,
+        "repository": {"name": "repo", "owner": {"login": "ONLYOFFICE"}},
+        "pull_request": {
+            "number": 7,
+            "title": "Fix title",
+            "html_url": "https://example.com/pr/7",
+            "head": {"sha": "def456"},
+            "base": {"repo": {"owner": {"login": "ONLYOFFICE"}}},
+        },
+    }
+
+    body_text = json.dumps(payload)
+    raw_body = body_text.encode("utf-8")
+    digest = hmac.new(b"secret", raw_body, hashlib.sha256).hexdigest()
+
+    event = {
+        "headers": {
+            "X-Gitea-Event": "pull_request",
+            "X-Gitea-Signature": digest,
+        },
+        "body": body_text,
+        "isBase64Encoded": False,
+    }
+
+    calls = []
+
+    def fake_set_commit_status(*args, **kwargs):
+        calls.append(("status", args, kwargs))
+        return 201, "{}", {}
+
+    def fake_post_pr_comment(*args, **kwargs):
+        calls.append(("comment", args, kwargs))
+        return 201, "{}", {}
+
+    class NonBlockingCheck:
+        @staticmethod
+        def run(pr_title, commits, diff_text):
+            return {
+                "feature": "info",
+                "title_violations": [],
+                "commit_violations": [],
+                "comment_violations": [],
+                "has_violations": False,
+                "always_comment": True,
+                "comment": "✅ all good",
+            }
+
+    monkeypatch.setattr(lf, "set_commit_status", fake_set_commit_status)
+    monkeypatch.setattr(lf, "post_pr_comment", fake_post_pr_comment)
+    monkeypatch.setattr(lf, "get_enabled_checks", lambda: [NonBlockingCheck])
+    monkeypatch.setattr(
+        lf,
+        "fetch_pr_diff",
+        lambda owner, repo, pr_number: "diff --git a/a b/a\n+++ b/a\n+// hello",
+    )
+    monkeypatch.setattr(lf, "fetch_pr_commits", lambda owner, repo, pr_number: [])
+
+    result = lf.lambda_handler(event, None)
+
+    assert result["statusCode"] == 200
+    body = json.loads(result["body"])
+    assert body["ok"] is True
+    assert body["status_state"] == "success"
+    kinds = [item[0] for item in calls]
+    assert kinds.count("status") == 2
+    assert kinds.count("comment") == 1

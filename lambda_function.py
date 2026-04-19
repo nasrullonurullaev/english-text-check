@@ -34,6 +34,10 @@ REQUIRED_CHECK_FIELDS = (
     "comment",
 )
 
+OPTIONAL_CHECK_FIELDS = (
+    "always_comment",
+)
+
 
 def response(status_code, body):
     return {
@@ -214,6 +218,11 @@ def normalize_check_result(raw_result):
     normalized["has_violations"] = bool(normalized["has_violations"])
     normalized["comment"] = str(normalized["comment"] or "")
 
+    for field in OPTIONAL_CHECK_FIELDS:
+        normalized[field] = result.get(field)
+
+    normalized["always_comment"] = bool(normalized.get("always_comment"))
+
     return normalized
 
 
@@ -322,14 +331,23 @@ def lambda_handler(event, context):
         title_violations = english_result["title_violations"]
         commit_violations = english_result["commit_violations"]
         comment_violations = english_result["comment_violations"]
-        has_violations = english_result["has_violations"]
+        has_violations = any(bool(item.get("has_violations")) for item in check_results)
 
-        if has_violations:
+        comments_to_post = []
+        for item in check_results:
+            comment_text = str(item.get("comment") or "").strip()
+            if not comment_text:
+                continue
+            if item.get("has_violations") or item.get("always_comment"):
+                comments_to_post.append(comment_text)
+
+        if comments_to_post:
+            full_comment = "\n\n---\n\n".join(comments_to_post)
             comment_status, comment_body, _ = post_pr_comment(
                 repo_owner,
                 repo_name,
                 int(pr_number),
-                english_result["comment"],
+                full_comment,
             )
 
             if comment_status >= 300:
@@ -340,11 +358,12 @@ def lambda_handler(event, context):
                     "gitea_body": comment_body[:2000],
                 })
 
+        if has_violations:
             status_state = "failure"
-            status_description = "Non-English characters found"
+            status_description = "One or more PR checks failed"
         else:
             status_state = "success"
-            status_description = "English text check passed"
+            status_description = "All PR checks passed"
 
         final_status, final_body, _ = set_commit_status(
             repo_owner,
