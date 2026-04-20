@@ -4,6 +4,7 @@ import os
 
 FEATURE_KEY = "ai_text_review"
 AI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-mini")
+OPENAI_TIMEOUT_SECONDS = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "15"))
 
 SYSTEM_PROMPT = """
 You are a strict reviewer for pull request text quality.
@@ -38,6 +39,7 @@ def _review_text(client, item_type, text):
 
     response = client.responses.create(
         model=AI_MODEL,
+        timeout=OPENAI_TIMEOUT_SECONDS,
         input=[
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt},
@@ -80,7 +82,6 @@ def _build_comment(pr_title_result, commit_results):
                 suggestion = item.get("suggested_commit_message") or ""
                 if suggestion:
                     lines.append("  - Example: `{0}`".format(suggestion.split("\n")[0][:120]))
-
     if pr_title_result and pr_title_result.get("overall_pass") and not commit_results:
         lines.append("✅ Everything is OK.")
 
@@ -108,12 +109,12 @@ def run(pr_title, commits, diff_text):
     try:
         from openai import OpenAI
 
-        client = OpenAI(api_key=api_key)
+        client = OpenAI(api_key=api_key, timeout=OPENAI_TIMEOUT_SECONDS)
 
         pr_title_result = _review_text(client, "pull request title", pr_title or "")
 
         commit_results = []
-        for commit_item in commits[:20]:
+        for commit_item in commits:
             message = ((commit_item.get("commit") or {}).get("message")) or ""
             if not message:
                 continue
