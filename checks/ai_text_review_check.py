@@ -31,11 +31,6 @@ Return ONLY valid JSON in this exact shape:
 """.strip()
 
 
-def _is_enabled():
-    enabled = os.getenv("AI_REVIEW_ENABLED", "1").lower()
-    return enabled in {"1", "true", "yes", "on"}
-
-
 def _review_text(client, item_type, text):
     user_prompt = (
         "Review this {0}. Return only JSON.\n\n{1}".format(item_type, text)
@@ -95,27 +90,19 @@ def _build_comment(pr_title_result, commit_results):
 def run(pr_title, commits, diff_text):
     del diff_text
 
-    if not _is_enabled():
-        return {
-            "feature": FEATURE_KEY,
-            "title_violations": [],
-            "commit_violations": [],
-            "comment_violations": [],
-            "has_violations": False,
-            "comment": "",
-            "should_comment": False,
-        }
-
     api_key = os.getenv("OPENAI_API_KEY", "")
     if not api_key:
         return {
             "feature": FEATURE_KEY,
-            "title_violations": [],
+            "title_violations": [{
+                "type": "ai_review_config",
+                "content": "OPENAI_API_KEY is not configured",
+            }],
             "commit_violations": [],
             "comment_violations": [],
-            "has_violations": False,
-            "comment": "",
-            "should_comment": False,
+            "has_violations": True,
+            "comment": "❌ AI text review is required but OPENAI_API_KEY is missing.",
+            "should_comment": True,
         }
 
     try:

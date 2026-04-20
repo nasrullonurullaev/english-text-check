@@ -94,12 +94,28 @@ def test_lambda_handler_success_path(monkeypatch):
         return 201, "{}", {}
 
     monkeypatch.setattr(lf, "set_commit_status", fake_set_commit_status)
+    monkeypatch.setattr(lf, "post_pr_comment", lambda *args, **kwargs: (201, "{}", {}))
     monkeypatch.setattr(
         lf,
         "fetch_pr_diff",
         lambda owner, repo, pr_number: "diff --git a/a b/a\n+++ b/a\n+// hello",
     )
     monkeypatch.setattr(lf, "fetch_pr_commits", lambda owner, repo, pr_number: [])
+    monkeypatch.setattr(
+        lf,
+        "run_enabled_checks",
+        lambda pr_title, commits, diff_text: [
+            {
+                "feature": "english_text",
+                "title_violations": [],
+                "commit_violations": [],
+                "comment_violations": [],
+                "has_violations": False,
+                "comment": "",
+                "should_comment": False,
+            }
+        ],
+    )
 
     result = lf.lambda_handler(event, None)
 
@@ -243,3 +259,15 @@ def test_lambda_handler_posts_comment_when_check_requests_it(monkeypatch):
     assert body["status_state"] == "success"
     assert len(status_calls) == 2
     assert len(comment_calls) == 1
+
+
+def test_ai_check_requires_openai_api_key(monkeypatch):
+    from checks import ai_text_review_check as ai_check
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    result = ai_check.run(pr_title="Fix title", commits=[], diff_text="")
+
+    assert result["has_violations"] is True
+    assert result["should_comment"] is True
+    assert result["title_violations"][0]["type"] == "ai_review_config"

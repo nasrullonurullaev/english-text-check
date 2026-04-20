@@ -27,7 +27,6 @@ Optional:
 
 AI review options:
 
-- `AI_REVIEW_ENABLED` (default: `1`)
 - `OPENAI_API_KEY` (required to actually call OpenAI)
 - `OPENAI_MODEL` (default: `gpt-5-mini`)
 
