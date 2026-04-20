@@ -45,6 +45,23 @@ def test_run_fails_closed_on_openai_runtime_error(monkeypatch):
     assert "failed" in result["comment"].lower()
 
 
+def test_run_timeout_error_is_non_blocking_warning(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "token")
+
+    class _BrokenOpenAI:
+        def __init__(self, api_key):
+            del api_key
+            raise RuntimeError("Request timed out.")
+
+    monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=_BrokenOpenAI))
+
+    result = ai_check.run(pr_title="Fix title", commits=[], diff_text="")
+
+    assert result["has_violations"] is False
+    assert result["title_violations"] == []
+    assert "temporarily unavailable" in result["comment"].lower()
+
+
 def test_run_trims_long_text_and_reviews(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "token")
 

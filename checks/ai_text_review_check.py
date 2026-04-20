@@ -81,6 +81,19 @@ def _review_text(client, item_type, text):
     return result
 
 
+def _is_transient_runtime_error(error_text):
+    lowered = (error_text or "").lower()
+    transient_markers = (
+        "timed out",
+        "timeout",
+        "connection reset",
+        "temporarily unavailable",
+        "service unavailable",
+        "rate limit",
+    )
+    return any(marker in lowered for marker in transient_markers)
+
+
 def _build_comment(pr_title_result, commit_results):
     lines = ["### 🤖 AI text review"]
 
@@ -175,15 +188,30 @@ def run(pr_title, commits, diff_text):
             "should_comment": True,
         }
     except Exception as e:
+        error_text = str(e)
+        if _is_transient_runtime_error(error_text):
+            return {
+                "feature": FEATURE_KEY,
+                "title_violations": [],
+                "commit_violations": [],
+                "comment_violations": [],
+                "has_violations": False,
+                "comment": (
+                    "⚠️ AI text review was executed but external API is temporarily "
+                    "unavailable: {0}. Please re-run checks."
+                ).format(error_text[:300]),
+                "should_comment": True,
+            }
+
         return {
             "feature": FEATURE_KEY,
             "title_violations": [{
                 "type": "ai_review_runtime_error",
-                "content": "AI review failed: {0}".format(str(e)[:250]),
+                "content": "AI review failed: {0}".format(error_text[:250]),
             }],
             "commit_violations": [],
             "comment_violations": [],
             "has_violations": True,
-            "comment": "❌ AI text review failed: {0}".format(str(e)[:400]),
+            "comment": "❌ AI text review failed: {0}".format(error_text[:400]),
             "should_comment": True,
         }
