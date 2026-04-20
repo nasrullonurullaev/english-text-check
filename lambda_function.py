@@ -16,6 +16,22 @@ WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
 ORG_NAME = os.getenv("ORG_NAME", "ONLYOFFICE")
 STATUS_CONTEXT = os.getenv("STATUS_CONTEXT", "English-Text-Check")
 
+
+def get_http_timeout_seconds():
+    raw = os.getenv("HTTP_TIMEOUT_SECONDS", "5")
+    try:
+        timeout = float(raw)
+    except (TypeError, ValueError):
+        return 5.0
+
+    if timeout <= 0:
+        return 5.0
+
+    return timeout
+
+
+HTTP_TIMEOUT_SECONDS = get_http_timeout_seconds()
+
 ALLOWED_ACTIONS = set(
     x.strip()
     for x in os.getenv(
@@ -93,7 +109,7 @@ def http_request(method, url, payload=None, accept="application/json"):
     req = urllib.request.Request(url=url, data=data, headers=headers, method=method)
 
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_SECONDS) as resp:
             body = resp.read().decode("utf-8", errors="replace")
             return resp.status, body, dict(resp.headers)
     except urllib.error.HTTPError as e:

@@ -24,6 +24,7 @@ Optional:
 - `ORG_NAME` (default: `ONLYOFFICE`)
 - `STATUS_CONTEXT` (default: `English-Text-Check`)
 - `ALLOWED_ACTIONS` (default: `opened,reopened,synchronize,edited,synchronized`)
+- `HTTP_TIMEOUT_SECONDS` (default: `5`, timeout for each outbound Gitea API request)
 
 AI review options:
 
