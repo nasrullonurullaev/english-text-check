@@ -1,0 +1,189 @@
+import json
+import os
+import time
+
+
+FEATURE_KEY = "ai_text_review"
+AI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-mini")
+OPENAI_TIMEOUT_SECONDS = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "20"))
+OPENAI_MAX_RETRIES = int(os.getenv("OPENAI_MAX_RETRIES", "2"))
+OPENAI_RETRY_DELAY_SECONDS = float(os.getenv("OPENAI_RETRY_DELAY_SECONDS", "0.8"))
+MAX_TITLE_CHARS = int(os.getenv("AI_MAX_TITLE_CHARS", "300"))
+MAX_COMMIT_MESSAGE_CHARS = int(os.getenv("AI_MAX_COMMIT_MESSAGE_CHARS", "2000"))
+MAX_COMMITS_TO_REVIEW = int(os.getenv("AI_MAX_COMMITS_TO_REVIEW", "20"))
+
+SYSTEM_PROMPT = """
+You are a strict reviewer for pull request text quality.
+
+Evaluate a commit or pull-request title text against these 7 rules:
+
+1. Separate subject from body with a blank line (for commit messages)
+2. Limit the subject line to 50 characters
+3. Capitalize the subject line
+4. Do not end the subject line with a period
+5. Use the imperative mood in the subject line
+6. Wrap the body at 72 characters (for commit messages with body)
+7. Use the body to explain what and why vs. how
+
+Return ONLY valid JSON in this exact shape:
+{
+  "overall_pass": true,
+  "score": 0,
+  "subject": "",
+  "body_present": true,
+  "checks": [],
+  "suggested_commit_message": "",
+  "summary": ""
+}
+""".strip()
+
+
+def _trim_text(text, limit):
+    text = text or ""
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "\n...[truncated]"
+
+
+def _review_text(client, item_type, text):
+    user_prompt = (
+        "Review this {0}. Return only JSON.\n\n{1}".format(item_type, text)
+    )
+
+    last_error = None
+    for attempt in range(OPENAI_MAX_RETRIES + 1):
+        try:
+            response = client.responses.create(
+                model=AI_MODEL,
+                input=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt},
+                ],
+                timeout=OPENAI_TIMEOUT_SECONDS,
+            )
+            break
+        except Exception as e:
+            last_error = e
+            if attempt >= OPENAI_MAX_RETRIES:
+                raise
+            time.sleep(OPENAI_RETRY_DELAY_SECONDS)
+    else:
+        raise last_error
+
+    raw_text = (response.output_text or "").strip()
+    if not raw_text:
+        raise ValueError("OpenAI returned an empty response")
+
+    result = json.loads(raw_text)
+    if not isinstance(result, dict):
+        raise ValueError("OpenAI response JSON must be an object")
+
+    return result
+
+
+def _build_comment(pr_title_result, commit_results):
+    lines = ["### 🤖 AI text review"]
+
+    if pr_title_result:
+        if pr_title_result.get("overall_pass"):
+            lines.append("✅ PR title: looks good.")
+        else:
+            lines.append("❌ PR title: needs improvement.")
+            lines.append("- Summary: {0}".format(pr_title_result.get("summary") or "No summary"))
+            suggestion = pr_title_result.get("suggested_commit_message") or ""
+            if suggestion:
+                lines.append("- Suggested title: `{0}`".format(suggestion.split("\n")[0][:120]))
+
+    if commit_results:
+        failed = [x for x in commit_results if not x.get("overall_pass")]
+        if not failed:
+            lines.append("✅ Commit messages: all reviewed commits look good.")
+        else:
+            lines.append("❌ Commit messages: {0} issue(s) found.".format(len(failed)))
+            for item in failed[:5]:
+                lines.append("- `{0}`".format(item.get("subject") or "(no subject)"))
+                lines.append("  - {0}".format(item.get("summary") or "Needs improvement"))
+                suggestion = item.get("suggested_commit_message") or ""
+                if suggestion:
+                    lines.append("  - Example: `{0}`".format(suggestion.split("\n")[0][:120]))
+
+    if pr_title_result and pr_title_result.get("overall_pass") and not commit_results:
+        lines.append("✅ Everything is OK.")
+
+    return "\n".join(lines)
+
+
+def run(pr_title, commits, diff_text):
+    del diff_text
+
+    api_key = os.getenv("OPENAI_API_KEY", "")
+    if not api_key:
+        return {
+            "feature": FEATURE_KEY,
+            "title_violations": [{
+                "type": "ai_review_config",
+                "content": "OPENAI_API_KEY is not configured",
+            }],
+            "commit_violations": [],
+            "comment_violations": [],
+            "has_violations": True,
+            "comment": "❌ AI text review is required but OPENAI_API_KEY is missing.",
+            "should_comment": True,
+        }
+
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(api_key=api_key)
+
+        trimmed_title = _trim_text(pr_title, MAX_TITLE_CHARS)
+        pr_title_result = _review_text(client, "pull request title", trimmed_title)
+
+        commit_results = []
+        for commit_item in commits[:MAX_COMMITS_TO_REVIEW]:
+            message = ((commit_item.get("commit") or {}).get("message")) or ""
+            if not message:
+                continue
+            trimmed_message = _trim_text(message, MAX_COMMIT_MESSAGE_CHARS)
+            reviewed = _review_text(client, "git commit message", trimmed_message)
+            commit_results.append(reviewed)
+
+        title_violations = []
+        if not pr_title_result.get("overall_pass"):
+            title_violations.append({
+                "type": "ai_pr_title",
+                "content": (pr_title_result.get("summary") or "PR title should be improved")[:300],
+            })
+
+        commit_violations = []
+        for item in commit_results:
+            if not item.get("overall_pass"):
+                commit_violations.append({
+                    "type": "ai_commit_message",
+                    "content": (item.get("summary") or "Commit message should be improved")[:300],
+                })
+
+        has_violations = bool(title_violations or commit_violations)
+
+        return {
+            "feature": FEATURE_KEY,
+            "title_violations": title_violations,
+            "commit_violations": commit_violations,
+            "comment_violations": [],
+            "has_violations": has_violations,
+            "comment": _build_comment(pr_title_result, commit_results),
+            "should_comment": True,
+        }
+    except Exception as e:
+        return {
+            "feature": FEATURE_KEY,
+            "title_violations": [{
+                "type": "ai_review_runtime_error",
+                "content": "AI review failed: {0}".format(str(e)[:250]),
+            }],
+            "commit_violations": [],
+            "comment_violations": [],
+            "has_violations": True,
+            "comment": "❌ AI text review failed: {0}".format(str(e)[:400]),
+            "should_comment": True,
+        }
