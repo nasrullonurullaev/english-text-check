@@ -100,6 +100,7 @@ def test_lambda_handler_success_path(monkeypatch):
         lambda owner, repo, pr_number: "diff --git a/a b/a\n+++ b/a\n+// hello",
     )
     monkeypatch.setattr(lf, "fetch_pr_commits", lambda owner, repo, pr_number: [])
+    monkeypatch.setattr(lf, "post_pr_comment", lambda *args, **kwargs: (201, "{}", {}))
 
     result = lf.lambda_handler(event, None)
 
@@ -138,20 +139,7 @@ def test_aggregate_english_result_fallback():
     assert result["comment"] == ""
 
 
-def test_get_enabled_checks_includes_ai_when_enabled(monkeypatch):
-    monkeypatch.setenv("ENABLE_PR_TITLE_AI_CHECK", "true")
-
-    from checks import get_enabled_checks
-
-    features = {check.FEATURE_KEY for check in get_enabled_checks()}
-    assert "english_text" in features
-    assert "pr_title_ai_review" in features
-
-
-def test_get_enabled_checks_includes_ai_when_api_key_present(monkeypatch):
-    monkeypatch.delenv("ENABLE_PR_TITLE_AI_CHECK", raising=False)
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-
+def test_get_enabled_checks_always_includes_ai_check():
     from checks import get_enabled_checks
 
     features = {check.FEATURE_KEY for check in get_enabled_checks()}
@@ -233,3 +221,59 @@ def test_lambda_handler_posts_non_blocking_check_comment(monkeypatch):
     kinds = [item[0] for item in calls]
     assert kinds.count("status") == 2
     assert kinds.count("comment") == 1
+
+
+def test_lambda_handler_reports_title_violations_from_all_checks(monkeypatch):
+    monkeypatch.setattr(lf, "GITEA_BASE_URL", "https://example.com")
+    monkeypatch.setattr(lf, "GITEA_TOKEN", "token")
+    monkeypatch.setattr(lf, "WEBHOOK_SECRET", "secret")
+    monkeypatch.setattr(lf, "ORG_NAME", "ONLYOFFICE")
+
+    payload = {
+        "action": "opened",
+        "number": 9,
+        "repository": {"name": "repo", "owner": {"login": "ONLYOFFICE"}},
+        "pull_request": {
+            "number": 9,
+            "title": "Dockerfile",
+            "html_url": "https://example.com/pr/9",
+            "head": {"sha": "fff111"},
+            "base": {"repo": {"owner": {"login": "ONLYOFFICE"}}},
+        },
+    }
+    body_text = json.dumps(payload)
+    raw_body = body_text.encode("utf-8")
+    digest = hmac.new(b"secret", raw_body, hashlib.sha256).hexdigest()
+
+    event = {
+        "headers": {"X-Gitea-Event": "pull_request", "X-Gitea-Signature": digest},
+        "body": body_text,
+        "isBase64Encoded": False,
+    }
+
+    class TitleFailCheck:
+        @staticmethod
+        def run(pr_title, commits, diff_text):
+            return {
+                "feature": "title",
+                "title_violations": [{"type": "title", "content": "bad"}],
+                "commit_violations": [],
+                "comment_violations": [],
+                "has_violations": True,
+                "always_comment": True,
+                "comment": "bad title",
+            }
+
+    monkeypatch.setattr(lf, "get_enabled_checks", lambda: [TitleFailCheck])
+    monkeypatch.setattr(lf, "set_commit_status", lambda *args, **kwargs: (201, "{}", {}))
+    monkeypatch.setattr(lf, "post_pr_comment", lambda *args, **kwargs: (201, "{}", {}))
+    monkeypatch.setattr(lf, "fetch_pr_diff", lambda *args, **kwargs: "diff --git a/a b/a\n+++ b/a\n+// hi")
+    monkeypatch.setattr(lf, "fetch_pr_commits", lambda *args, **kwargs: [])
+
+    result = lf.lambda_handler(event, None)
+    body = json.loads(result["body"])
+
+    assert result["statusCode"] == 200
+    assert body["title_violations"] == 1
+    assert body["violations"] == 1
+    assert body["status_state"] == "failure"

@@ -326,12 +326,16 @@ def lambda_handler(event, context):
             commits = []
 
         check_results = run_enabled_checks(pr_title=pr_title, commits=commits, diff_text=diff_text)
-        english_result = aggregate_english_result(check_results)
 
-        title_violations = english_result["title_violations"]
-        commit_violations = english_result["commit_violations"]
-        comment_violations = english_result["comment_violations"]
-        has_violations = any(bool(item.get("has_violations")) for item in check_results)
+        title_violations = []
+        commit_violations = []
+        comment_violations = []
+        for item in check_results:
+            title_violations.extend(item.get("title_violations") or [])
+            commit_violations.extend(item.get("commit_violations") or [])
+            comment_violations.extend(item.get("comment_violations") or [])
+
+        has_violations = bool(title_violations or commit_violations or comment_violations)
 
         comments_to_post = []
         for item in check_results:
