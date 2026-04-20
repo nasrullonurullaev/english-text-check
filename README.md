@@ -1,12 +1,43 @@
 # english-text-check
 
-AWS Lambda function for checking English-only text in Gitea pull requests.
+AWS Lambda function for checking pull request text quality in Gitea pull requests.
 
 ## Architecture
 
 - `lambda_function.py` is the single entrypoint (webhook parsing, Gitea API calls, PR flow).
-- `checks/` contains feature modules. Add a new file there and register it in `checks/__init__.py` to extend behavior in future without rewriting the Lambda flow.
-- `checks/english_text_check.py` contains the current English text validation rules.
+- `checks/` contains feature modules. Add a new file there and register it in `checks/__init__.py` to extend behavior without rewriting the Lambda flow.
+- `checks/english_text_check.py` validates English-only text in PR title, commit messages, and code comments.
+- `checks/ai_text_review_check.py` uses OpenAI to review PR title and commit messages and posts a human-friendly PR comment:
+  - ✅ if everything looks good;
+  - ❌ with suggestions and example wording when issues are found.
+
+## Environment variables
+
+Required:
+
+- `GITEA_BASE_URL`
+- `GITEA_TOKEN`
+- `WEBHOOK_SECRET`
+
+Optional:
+
+- `ORG_NAME` (default: `ONLYOFFICE`)
+- `STATUS_CONTEXT` (default: `English-Text-Check`)
+- `ALLOWED_ACTIONS` (default: `opened,reopened,synchronize,edited,synchronized`)
+
+AI review options:
+
+- `AI_REVIEW_ENABLED` (default: `1`)
+- `OPENAI_API_KEY` (required to actually call OpenAI)
+- `OPENAI_MODEL` (default: `gpt-5-mini`)
+
+## OpenAI dependency
+
+Install dependency for the AI feature:
+
+```bash
+pip install openai
+```
 
 ## Run tests locally
 
