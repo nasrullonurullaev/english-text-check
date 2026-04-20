@@ -148,6 +148,17 @@ def test_get_enabled_checks_includes_ai_when_enabled(monkeypatch):
     assert "pr_title_ai_review" in features
 
 
+def test_get_enabled_checks_includes_ai_when_api_key_present(monkeypatch):
+    monkeypatch.delenv("ENABLE_PR_TITLE_AI_CHECK", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    from checks import get_enabled_checks
+
+    features = {check.FEATURE_KEY for check in get_enabled_checks()}
+    assert "english_text" in features
+    assert "pr_title_ai_review" in features
+
+
 def test_lambda_handler_posts_non_blocking_check_comment(monkeypatch):
     monkeypatch.setattr(lf, "GITEA_BASE_URL", "https://example.com")
     monkeypatch.setattr(lf, "GITEA_TOKEN", "token")

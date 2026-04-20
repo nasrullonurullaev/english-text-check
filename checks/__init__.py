@@ -26,7 +26,10 @@ def get_enabled_checks():
     """
     checks = [english_text_check]
 
-    if _is_truthy(os.getenv("ENABLE_PR_TITLE_AI_CHECK", "false")):
+    ai_enabled = _is_truthy(os.getenv("ENABLE_PR_TITLE_AI_CHECK", ""))
+    has_api_key = bool(str(os.getenv("OPENAI_API_KEY", "")).strip())
+
+    if ai_enabled or has_api_key:
         checks.append(pr_title_ai_review)
 
     return checks

@@ -9,13 +9,15 @@ AWS Lambda function for checking text quality in Gitea pull requests.
 - `checks/english_text_check.py` contains English text validation for PR title, commit messages, and code comments.
 - `checks/pr_title_ai_review.py` (optional feature) reviews PR title style with OpenAI and leaves a comment with either ✅ feedback or ❌ advice + example title.
 
-## Optional AI PR title review feature
+## AI PR title review feature
 
-Set these variables to enable the new feature:
+The new feature is activated automatically when `OPENAI_API_KEY` is set.
+You can also force-enable it with `ENABLE_PR_TITLE_AI_CHECK=true`.
 
 ```bash
-export ENABLE_PR_TITLE_AI_CHECK=true
 export OPENAI_API_KEY="your_api_key"
+# Optional, force-enable even if key is injected later
+export ENABLE_PR_TITLE_AI_CHECK=true
 # Optional, default is gpt-4o-mini
 export OPENAI_MODEL="gpt-4o-mini"
 ```
