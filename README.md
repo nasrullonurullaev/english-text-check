@@ -30,6 +30,7 @@ AI review options:
 - `OPENAI_API_KEY` (required to actually call OpenAI)
 - `OPENAI_MODEL` (default: `gpt-5-mini`)
 - `OPENAI_TIMEOUT_SECONDS` (default: `15`) — timeout for each OpenAI request in seconds.
+- `ENABLE_ASYNC_WEBHOOK` (default: `false`) — when `true`, Lambda returns `202` quickly and processes PR checks in async self-invocation.
 
 Webhook timeout note:
 - If your webhook sender reports `context deadline exceeded`, increase timeout on both:

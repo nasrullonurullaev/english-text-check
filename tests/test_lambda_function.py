@@ -271,3 +271,43 @@ def test_ai_check_requires_openai_api_key(monkeypatch):
     assert result["has_violations"] is True
     assert result["should_comment"] is True
     assert result["title_violations"][0]["type"] == "ai_review_config"
+
+
+def test_lambda_handler_returns_202_when_async_mode_enabled(monkeypatch):
+    monkeypatch.setattr(lf, "GITEA_BASE_URL", "https://example.com")
+    monkeypatch.setattr(lf, "GITEA_TOKEN", "token")
+    monkeypatch.setattr(lf, "WEBHOOK_SECRET", "secret")
+    monkeypatch.setattr(lf, "ORG_NAME", "ONLYOFFICE")
+    monkeypatch.setattr(lf, "ENABLE_ASYNC_WEBHOOK", True)
+    monkeypatch.setattr(lf, "enqueue_async_processing", lambda payload, context: True)
+    monkeypatch.setattr(lf, "process_pull_request_payload", lambda payload: (_ for _ in ()).throw(Exception("must not run sync")))
+
+    payload = {
+        "action": "opened",
+        "number": 42,
+        "repository": {"name": "repo", "owner": {"login": "ONLYOFFICE"}},
+        "pull_request": {
+            "number": 42,
+            "title": "Fix english text",
+            "html_url": "https://example.com/pr/42",
+            "head": {"sha": "abc123"},
+            "base": {"repo": {"owner": {"login": "ONLYOFFICE"}}},
+        },
+    }
+    body_text = json.dumps(payload)
+    digest = hmac.new(b"secret", body_text.encode("utf-8"), hashlib.sha256).hexdigest()
+
+    event = {
+        "headers": {
+            "X-Gitea-Event": "pull_request",
+            "X-Gitea-Signature": digest,
+        },
+        "body": body_text,
+        "isBase64Encoded": False,
+    }
+
+    result = lf.lambda_handler(event, None)
+    assert result["statusCode"] == 202
+    body = json.loads(result["body"])
+    assert body["ok"] is True
+    assert body["queued"] is True

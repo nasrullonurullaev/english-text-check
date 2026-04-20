@@ -15,6 +15,7 @@ GITEA_TOKEN = os.getenv("GITEA_TOKEN", "")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
 ORG_NAME = os.getenv("ORG_NAME", "ONLYOFFICE")
 STATUS_CONTEXT = os.getenv("STATUS_CONTEXT", "English-Text-Check")
+ENABLE_ASYNC_WEBHOOK = os.getenv("ENABLE_ASYNC_WEBHOOK", "false").lower() == "true"
 
 ALLOWED_ACTIONS = set(
     x.strip()
@@ -284,6 +285,10 @@ def lambda_handler(event, context):
         if not WEBHOOK_SECRET:
             return response(500, {"ok": False, "error": "Missing env var WEBHOOK_SECRET"})
 
+        if event.get("_async_worker"):
+            payload = event.get("payload") or {}
+            return process_pull_request_payload(payload)
+
         headers = event.get("headers") or {}
         lower_headers = normalize_headers(headers)
 
@@ -305,6 +310,50 @@ def lambda_handler(event, context):
         if not is_org_pr(payload, ORG_NAME):
             return response(200, {"ok": True, "ignored": True, "reason": "not org PR"})
 
+        if ENABLE_ASYNC_WEBHOOK:
+            queued = enqueue_async_processing(payload, context)
+            if queued:
+                return response(202, {"ok": True, "queued": True})
+
+        return process_pull_request_payload(payload)
+    except Exception as e:
+        return response(500, {
+            "ok": False,
+            "error": type(e).__name__,
+            "details": str(e),
+        })
+
+
+def enqueue_async_processing(payload, context):
+    try:
+        import boto3
+    except Exception as e:
+        print("DEBUG async disabled: boto3 import failed:", str(e))
+        return False
+
+    function_name = getattr(context, "invoked_function_arn", "") or os.getenv("AWS_LAMBDA_FUNCTION_NAME", "")
+    if not function_name:
+        print("DEBUG async disabled: function name is missing")
+        return False
+
+    try:
+        lambda_client = boto3.client("lambda")
+        lambda_client.invoke(
+            FunctionName=function_name,
+            InvocationType="Event",
+            Payload=json.dumps({
+                "_async_worker": True,
+                "payload": payload,
+            }).encode("utf-8"),
+        )
+        return True
+    except Exception as e:
+        print("DEBUG async invoke failed:", str(e))
+        return False
+
+
+def process_pull_request_payload(payload):
+    try:
         repo = payload.get("repository") or {}
         repo_owner = ((repo.get("owner") or {}).get("login")) or ""
         repo_name = repo.get("name") or ""
@@ -405,7 +454,6 @@ def lambda_handler(event, context):
             "status_context": STATUS_CONTEXT,
             "status_state": status_state,
         })
-
     except Exception as e:
         return response(500, {
             "ok": False,
