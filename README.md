@@ -29,14 +29,15 @@ AI review options:
 
 - `OPENAI_API_KEY` (required to actually call OpenAI)
 - `OPENAI_MODEL` (default: `gpt-5-mini`)
-- `OPENAI_TIMEOUT_SECONDS` (default: `20`)
-- `OPENAI_MAX_RETRIES` (default: `2`)
+- `OPENAI_TIMEOUT_SECONDS` (default: `5`)
+- `OPENAI_MAX_RETRIES` (default: `0`)
 - `OPENAI_RETRY_DELAY_SECONDS` (default: `0.8`)
 - `AI_MAX_TITLE_CHARS` (default: `300`)
 - `AI_MAX_COMMIT_MESSAGE_CHARS` (default: `2000`)
-- `AI_MAX_COMMITS_TO_REVIEW` (default: `20`)
+- `AI_MAX_COMMITS_TO_REVIEW` (default: `5`)
 
 > AI review is fail-closed: if OpenAI call fails at runtime, the check reports failure.
+> Defaults are tuned for webhook responsiveness (short timeout, no retries, review up to 5 commits).
 
 ## OpenAI dependency
 

@@ -5,12 +5,12 @@ import time
 
 FEATURE_KEY = "ai_text_review"
 AI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-mini")
-OPENAI_TIMEOUT_SECONDS = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "20"))
-OPENAI_MAX_RETRIES = int(os.getenv("OPENAI_MAX_RETRIES", "2"))
+OPENAI_TIMEOUT_SECONDS = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "5"))
+OPENAI_MAX_RETRIES = int(os.getenv("OPENAI_MAX_RETRIES", "0"))
 OPENAI_RETRY_DELAY_SECONDS = float(os.getenv("OPENAI_RETRY_DELAY_SECONDS", "0.8"))
 MAX_TITLE_CHARS = int(os.getenv("AI_MAX_TITLE_CHARS", "300"))
 MAX_COMMIT_MESSAGE_CHARS = int(os.getenv("AI_MAX_COMMIT_MESSAGE_CHARS", "2000"))
-MAX_COMMITS_TO_REVIEW = int(os.getenv("AI_MAX_COMMITS_TO_REVIEW", "20"))
+MAX_COMMITS_TO_REVIEW = int(os.getenv("AI_MAX_COMMITS_TO_REVIEW", "5"))
 
 SYSTEM_PROMPT = """
 You are a strict reviewer for pull request text quality.
