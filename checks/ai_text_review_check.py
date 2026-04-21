@@ -4,6 +4,11 @@ import os
 
 FEATURE_KEY = "ai_text_review"
 AI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-mini")
+AI_REVIEW_REPOSITORIES = set(
+    item.strip().lower()
+    for item in os.getenv("AI_REVIEW_REPOSITORIES", "DocSpace-buildtols").split(",")
+    if item.strip()
+)
 
 SYSTEM_PROMPT = """
 You are a strict reviewer for pull request text quality.
@@ -17,6 +22,9 @@ Evaluate a commit or pull-request title text against these 7 rules:
 5. Use the imperative mood in the subject line
 6. Wrap the body at 72 characters (for commit messages with body)
 7. Use the body to explain what and why vs. how
+
+When reviewing commit messages, ignore any fragments enclosed in
+square brackets (for example: [PDF Form], [skip ci], [ABC-123]).
 
 Return ONLY valid JSON in this exact shape:
 {
@@ -87,8 +95,30 @@ def _build_comment(pr_title_result, commit_results):
     return "\n".join(lines)
 
 
-def run(pr_title, commits, diff_text):
+def _is_repo_allowed_for_ai_review(repository_name):
+    if not AI_REVIEW_REPOSITORIES:
+        return False
+
+    name = (repository_name or "").strip().lower()
+    if not name:
+        return False
+
+    short_name = name.split("/")[-1]
+    return name in AI_REVIEW_REPOSITORIES or short_name in AI_REVIEW_REPOSITORIES
+
+
+def run(pr_title, commits, diff_text, repository_name=""):
     del diff_text
+    if not _is_repo_allowed_for_ai_review(repository_name):
+        return {
+            "feature": FEATURE_KEY,
+            "title_violations": [],
+            "commit_violations": [],
+            "comment_violations": [],
+            "has_violations": False,
+            "comment": "",
+            "should_comment": False,
+        }
 
     api_key = os.getenv("OPENAI_API_KEY", "")
     if not api_key:

@@ -274,10 +274,18 @@ def normalize_check_result(raw_result):
     return normalized
 
 
-def run_enabled_checks(pr_title, commits, diff_text):
+def run_enabled_checks(pr_title, commits, diff_text, repository_name=""):
     results = []
     for check in get_enabled_checks():
-        raw_result = check.run(pr_title=pr_title, commits=commits, diff_text=diff_text)
+        try:
+            raw_result = check.run(
+                pr_title=pr_title,
+                commits=commits,
+                diff_text=diff_text,
+                repository_name=repository_name,
+            )
+        except TypeError:
+            raw_result = check.run(pr_title=pr_title, commits=commits, diff_text=diff_text)
         results.append(normalize_check_result(raw_result))
     return results
 
@@ -401,7 +409,12 @@ def lambda_handler(event, context):
             print("DEBUG commit check skipped:", str(e))
             commits = []
 
-        check_results = run_enabled_checks(pr_title=pr_title, commits=commits, diff_text=diff_text)
+        check_results = run_enabled_checks(
+            pr_title=pr_title,
+            commits=commits,
+            diff_text=diff_text,
+            repository_name=repo_name,
+        )
         aggregated = aggregate_check_results(check_results)
 
         title_violations = aggregated["title_violations"]

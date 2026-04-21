@@ -105,7 +105,7 @@ def test_lambda_handler_success_path(monkeypatch):
     monkeypatch.setattr(
         lf,
         "run_enabled_checks",
-        lambda pr_title, commits, diff_text: [
+        lambda pr_title, commits, diff_text, repository_name="": [
             {
                 "feature": "english_text",
                 "title_violations": [],
@@ -239,7 +239,7 @@ def test_lambda_handler_posts_comment_when_check_requests_it(monkeypatch):
     monkeypatch.setattr(
         lf,
         "run_enabled_checks",
-        lambda pr_title, commits, diff_text: [
+        lambda pr_title, commits, diff_text, repository_name="": [
             {
                 "feature": "ai_text_review",
                 "title_violations": [],
@@ -312,7 +312,13 @@ def test_upsert_pr_comment_creates_when_no_managed_comment(monkeypatch):
 
 def test_ai_text_review_is_advisory_when_api_key_missing(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    result = ai_check.run(pr_title="test", commits=[], diff_text="")
+    monkeypatch.setattr(ai_check, "AI_REVIEW_REPOSITORIES", {"docspace-buildtols"})
+    result = ai_check.run(
+        pr_title="test",
+        commits=[],
+        diff_text="",
+        repository_name="DocSpace-buildtols",
+    )
 
     assert result["has_violations"] is False
     assert "skipped" in result["comment"].lower()
@@ -341,9 +347,28 @@ def test_ai_text_review_comment_uses_advice_wording():
 
 def test_ai_check_requires_openai_api_key(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr(ai_check, "AI_REVIEW_REPOSITORIES", {"docspace-buildtols"})
 
-    result = ai_check.run(pr_title="Fix title", commits=[], diff_text="")
+    result = ai_check.run(pr_title="Fix title", commits=[], diff_text="", repository_name="DocSpace-buildtols")
 
     assert result["has_violations"] is False
     assert result["should_comment"] is True
     assert result["title_violations"] == []
+
+
+def test_ai_check_skips_repository_outside_allowlist(monkeypatch):
+    monkeypatch.setattr(ai_check, "AI_REVIEW_REPOSITORIES", {"docspace-buildtols"})
+    result = ai_check.run(
+        pr_title="Fix title",
+        commits=[],
+        diff_text="",
+        repository_name="another-repo",
+    )
+
+    assert result["has_violations"] is False
+    assert result["should_comment"] is False
+    assert result["comment"] == ""
+
+
+def test_ai_prompt_mentions_square_brackets_ignored():
+    assert "ignore any fragments enclosed in\nsquare brackets" in ai_check.SYSTEM_PROMPT
