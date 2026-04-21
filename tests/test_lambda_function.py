@@ -105,7 +105,7 @@ def test_lambda_handler_success_path(monkeypatch):
     monkeypatch.setattr(
         lf,
         "run_enabled_checks",
-        lambda pr_title, commits, diff_text: [
+        lambda pr_title, commits, diff_text, repo_name="": [
             {
                 "feature": "english_text",
                 "title_violations": [],
@@ -144,6 +144,63 @@ def test_run_enabled_checks_normalizes_result(monkeypatch):
     assert result["comment_violations"] == []
     assert result["has_violations"] is False
     assert result["comment"] == ""
+
+
+def test_run_enabled_checks_skips_ai_for_non_whitelisted_repo(monkeypatch):
+    class EnglishCheck:
+        FEATURE_KEY = "english_text"
+
+        @staticmethod
+        def run(pr_title, commits, diff_text):
+            return {"feature": "english_text"}
+
+    class AiCheck:
+        FEATURE_KEY = "ai_text_review"
+
+        @staticmethod
+        def run(pr_title, commits, diff_text):
+            return {"feature": "ai_text_review"}
+
+    monkeypatch.setattr(lf, "get_enabled_checks", lambda: [EnglishCheck, AiCheck])
+    monkeypatch.setattr(lf, "AI_REPOSITORY_WHITELIST", {"DocSpace-buildtools"})
+
+    results = lf.run_enabled_checks(
+        "title",
+        [],
+        "diff --git a/a b/a",
+        repo_name="some-other-repo",
+    )
+    assert len(results) == 1
+    assert results[0]["feature"] == "english_text"
+
+
+def test_run_enabled_checks_includes_ai_for_whitelisted_repo(monkeypatch):
+    class EnglishCheck:
+        FEATURE_KEY = "english_text"
+
+        @staticmethod
+        def run(pr_title, commits, diff_text):
+            return {"feature": "english_text"}
+
+    class AiCheck:
+        FEATURE_KEY = "ai_text_review"
+
+        @staticmethod
+        def run(pr_title, commits, diff_text):
+            return {"feature": "ai_text_review"}
+
+    monkeypatch.setattr(lf, "get_enabled_checks", lambda: [EnglishCheck, AiCheck])
+    monkeypatch.setattr(lf, "AI_REPOSITORY_WHITELIST", {"DocSpace-buildtools"})
+
+    results = lf.run_enabled_checks(
+        "title",
+        [],
+        "diff --git a/a b/a",
+        repo_name="DocSpace-buildtools",
+    )
+    assert len(results) == 2
+    assert results[0]["feature"] == "english_text"
+    assert results[1]["feature"] == "ai_text_review"
 
 
 def test_aggregate_english_result_fallback():
@@ -239,7 +296,7 @@ def test_lambda_handler_posts_comment_when_check_requests_it(monkeypatch):
     monkeypatch.setattr(
         lf,
         "run_enabled_checks",
-        lambda pr_title, commits, diff_text: [
+        lambda pr_title, commits, diff_text, repo_name="": [
             {
                 "feature": "ai_text_review",
                 "title_violations": [],

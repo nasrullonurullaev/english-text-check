@@ -29,6 +29,9 @@ AI review options:
 
 - `OPENAI_API_KEY` (required to actually call OpenAI)
 - `OPENAI_MODEL` (default: `gpt-5-mini`)
+- `AI_REPOSITORY_WHITELIST` (comma-separated repo names where AI review is enabled; default: `DocSpace-buildtools,document-server-package`)
+
+`english_text_check` always runs for all repositories. `ai_text_review_check` runs only for repositories listed in `AI_REPOSITORY_WHITELIST`.
 
 ## OpenAI dependency
 

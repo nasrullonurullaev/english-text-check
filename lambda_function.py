@@ -24,6 +24,14 @@ ALLOWED_ACTIONS = set(
     ).split(",")
     if x.strip()
 )
+AI_REPOSITORY_WHITELIST = set(
+    x.strip()
+    for x in os.getenv(
+        "AI_REPOSITORY_WHITELIST",
+        "DocSpace-buildtools,document-server-package",
+    ).split(",")
+    if x.strip()
+)
 
 REQUIRED_CHECK_FIELDS = (
     "feature",
@@ -274,9 +282,21 @@ def normalize_check_result(raw_result):
     return normalized
 
 
-def run_enabled_checks(pr_title, commits, diff_text):
+def is_ai_review_enabled_for_repo(repo_name):
+    if not repo_name:
+        return False
+    return repo_name in AI_REPOSITORY_WHITELIST
+
+
+def run_enabled_checks(pr_title, commits, diff_text, repo_name=""):
     results = []
     for check in get_enabled_checks():
+        if (
+            getattr(check, "FEATURE_KEY", "") == "ai_text_review"
+            and not is_ai_review_enabled_for_repo(repo_name)
+        ):
+            continue
+
         raw_result = check.run(pr_title=pr_title, commits=commits, diff_text=diff_text)
         results.append(normalize_check_result(raw_result))
     return results
@@ -401,7 +421,12 @@ def lambda_handler(event, context):
             print("DEBUG commit check skipped:", str(e))
             commits = []
 
-        check_results = run_enabled_checks(pr_title=pr_title, commits=commits, diff_text=diff_text)
+        check_results = run_enabled_checks(
+            pr_title=pr_title,
+            commits=commits,
+            diff_text=diff_text,
+            repo_name=repo_name,
+        )
         aggregated = aggregate_check_results(check_results)
 
         title_violations = aggregated["title_violations"]
