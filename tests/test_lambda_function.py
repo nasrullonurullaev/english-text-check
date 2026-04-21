@@ -95,7 +95,7 @@ def test_lambda_handler_success_path(monkeypatch):
         return 201, "{}", {}
 
     monkeypatch.setattr(lf, "set_commit_status", fake_set_commit_status)
-    monkeypatch.setattr(lf, "post_pr_comment", lambda *args, **kwargs: (201, "{}", {}))
+    monkeypatch.setattr(lf, "upsert_pr_comment", lambda *args, **kwargs: (201, "{}", {}))
     monkeypatch.setattr(
         lf,
         "fetch_pr_diff",
@@ -224,12 +224,12 @@ def test_lambda_handler_posts_comment_when_check_requests_it(monkeypatch):
         status_calls.append((args, kwargs))
         return 201, "{}", {}
 
-    def fake_post_pr_comment(*args, **kwargs):
+    def fake_upsert_pr_comment(*args, **kwargs):
         comment_calls.append((args, kwargs))
         return 201, "{}", {}
 
     monkeypatch.setattr(lf, "set_commit_status", fake_set_commit_status)
-    monkeypatch.setattr(lf, "post_pr_comment", fake_post_pr_comment)
+    monkeypatch.setattr(lf, "upsert_pr_comment", fake_upsert_pr_comment)
     monkeypatch.setattr(
         lf,
         "fetch_pr_diff",
@@ -259,6 +259,55 @@ def test_lambda_handler_posts_comment_when_check_requests_it(monkeypatch):
     assert body["ok"] is True
     assert body["status_state"] == "success"
     assert len(status_calls) == 2
+    assert len(comment_calls) == 1
+
+
+def test_upsert_pr_comment_updates_existing_managed_comment(monkeypatch):
+    monkeypatch.setattr(
+        lf,
+        "list_pr_comments",
+        lambda owner, repo, pr_number: (
+            200,
+            "[]",
+            {},
+            [{"id": 5, "body": "old\n\n{0}".format(lf.COMMENT_MARKER)}],
+        ),
+    )
+    edited = []
+    monkeypatch.setattr(
+        lf,
+        "edit_issue_comment",
+        lambda owner, repo, comment_id, text: edited.append((comment_id, text)) or (200, "{}", {}),
+    )
+    monkeypatch.setattr(
+        lf,
+        "post_pr_comment",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not create a new comment")),
+    )
+
+    status, _, _ = lf.upsert_pr_comment("ONLYOFFICE", "repo", 1, "new body")
+    assert status == 200
+    assert edited[0][0] == 5
+    assert lf.COMMENT_MARKER in edited[0][1]
+
+
+def test_upsert_pr_comment_creates_when_no_managed_comment(monkeypatch):
+    monkeypatch.setattr(
+        lf,
+        "list_pr_comments",
+        lambda owner, repo, pr_number: (200, "[]", {}, [{"id": 7, "body": "random comment"}]),
+    )
+    created = []
+    monkeypatch.setattr(
+        lf,
+        "post_pr_comment",
+        lambda owner, repo, pr_number, text: created.append((pr_number, text)) or (201, "{}", {}),
+    )
+
+    status, _, _ = lf.upsert_pr_comment("ONLYOFFICE", "repo", 42, "new body")
+    assert status == 201
+    assert created[0][0] == 42
+    assert lf.COMMENT_MARKER in created[0][1]
 
 
 def test_ai_text_review_is_advisory_when_api_key_missing(monkeypatch):

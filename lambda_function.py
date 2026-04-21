@@ -34,6 +34,7 @@ REQUIRED_CHECK_FIELDS = (
     "comment",
     "should_comment",
 )
+COMMENT_MARKER = "<!-- english-text-check:managed -->"
 
 
 def response(status_code, body):
@@ -118,6 +119,60 @@ def post_pr_comment(owner, repo, pr_number, text):
         pr_number=pr_number,
     )
     return gitea_api_request("POST", path, {"body": text})
+
+
+def list_pr_comments(owner, repo, pr_number):
+    path = "/api/v1/repos/{owner}/{repo}/issues/{pr_number}/comments".format(
+        owner=owner,
+        repo=repo,
+        pr_number=pr_number,
+    )
+    status, body, headers = gitea_api_request("GET", path)
+    if status >= 300:
+        return status, body, headers, []
+
+    try:
+        comments = json.loads(body)
+    except Exception:
+        comments = []
+
+    if not isinstance(comments, list):
+        comments = []
+
+    return status, body, headers, comments
+
+
+def edit_issue_comment(owner, repo, comment_id, text):
+    path = "/api/v1/repos/{owner}/{repo}/issues/comments/{comment_id}".format(
+        owner=owner,
+        repo=repo,
+        comment_id=comment_id,
+    )
+    return gitea_api_request("PATCH", path, {"body": text})
+
+
+def build_managed_comment(text):
+    return "{0}\n\n{1}".format(text, COMMENT_MARKER)
+
+
+def upsert_pr_comment(owner, repo, pr_number, text):
+    managed_text = build_managed_comment(text)
+
+    status, body, headers, comments = list_pr_comments(owner, repo, pr_number)
+    if status >= 300:
+        return status, body, headers
+
+    existing = None
+    for item in comments:
+        item_body = (item or {}).get("body") or ""
+        if COMMENT_MARKER in item_body:
+            if not existing or int(item.get("id") or 0) > int(existing.get("id") or 0):
+                existing = item
+
+    if existing and existing.get("id"):
+        return edit_issue_comment(owner, repo, int(existing["id"]), managed_text)
+
+    return post_pr_comment(owner, repo, pr_number, managed_text)
 
 
 def set_commit_status(owner, repo, sha, state, description, target_url=""):
@@ -355,7 +410,7 @@ def lambda_handler(event, context):
         has_violations = aggregated["has_violations"]
 
         if aggregated["comment"]:
-            comment_status, comment_body, _ = post_pr_comment(
+            comment_status, comment_body, _ = upsert_pr_comment(
                 repo_owner,
                 repo_name,
                 int(pr_number),
