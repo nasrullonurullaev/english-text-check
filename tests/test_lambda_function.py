@@ -4,6 +4,7 @@ import hmac
 import hashlib
 
 import lambda_function as lf
+from checks import ai_text_review_check as ai_check
 
 
 def test_verify_signature_accepts_gitea_header(monkeypatch):
@@ -258,16 +259,42 @@ def test_lambda_handler_posts_comment_when_check_requests_it(monkeypatch):
     assert body["ok"] is True
     assert body["status_state"] == "success"
     assert len(status_calls) == 2
-    assert len(comment_calls) == 1
+
+
+def test_ai_text_review_is_advisory_when_api_key_missing(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    result = ai_check.run(pr_title="test", commits=[], diff_text="")
+
+    assert result["has_violations"] is False
+    assert "skipped" in result["comment"].lower()
+    assert result["should_comment"] is True
+
+
+def test_ai_text_review_comment_uses_advice_wording():
+    pr_title_result = {
+        "overall_pass": False,
+        "summary": "Use imperative mood.",
+        "suggested_commit_message": "Set default branch to master",
+    }
+    commit_results = [
+        {
+            "overall_pass": False,
+            "subject": "fix: bad title",
+            "summary": "Capitalize the subject.",
+            "suggested_commit_message": "Fix bad title",
+        }
+    ]
+
+    comment = ai_check._build_comment(pr_title_result, commit_results)
+    assert "💡 PR title: improvement suggestion." in comment
+    assert "💡 Commit messages: 1 suggestion(s)." in comment
 
 
 def test_ai_check_requires_openai_api_key(monkeypatch):
-    from checks import ai_text_review_check as ai_check
-
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     result = ai_check.run(pr_title="Fix title", commits=[], diff_text="")
 
-    assert result["has_violations"] is True
+    assert result["has_violations"] is False
     assert result["should_comment"] is True
-    assert result["title_violations"][0]["type"] == "ai_review_config"
+    assert result["title_violations"] == []

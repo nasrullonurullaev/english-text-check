@@ -62,8 +62,8 @@ def _build_comment(pr_title_result, commit_results):
         if pr_title_result.get("overall_pass"):
             lines.append("✅ PR title: looks good.")
         else:
-            lines.append("❌ PR title: needs improvement.")
-            lines.append("- Summary: {0}".format(pr_title_result.get("summary") or "No summary"))
+            lines.append("💡 PR title: improvement suggestion.")
+            lines.append("- Advice: {0}".format(pr_title_result.get("summary") or "No summary"))
             suggestion = pr_title_result.get("suggested_commit_message") or ""
             if suggestion:
                 lines.append("- Suggested title: `{0}`".format(suggestion.split("\n")[0][:120]))
@@ -73,10 +73,10 @@ def _build_comment(pr_title_result, commit_results):
         if not failed:
             lines.append("✅ Commit messages: all reviewed commits look good.")
         else:
-            lines.append("❌ Commit messages: {0} issue(s) found.".format(len(failed)))
+            lines.append("💡 Commit messages: {0} suggestion(s).".format(len(failed)))
             for item in failed[:5]:
                 lines.append("- `{0}`".format(item.get("subject") or "(no subject)"))
-                lines.append("  - {0}".format(item.get("summary") or "Needs improvement"))
+                lines.append("  - Advice: {0}".format(item.get("summary") or "Needs improvement"))
                 suggestion = item.get("suggested_commit_message") or ""
                 if suggestion:
                     lines.append("  - Example: `{0}`".format(suggestion.split("\n")[0][:120]))
@@ -94,14 +94,11 @@ def run(pr_title, commits, diff_text):
     if not api_key:
         return {
             "feature": FEATURE_KEY,
-            "title_violations": [{
-                "type": "ai_review_config",
-                "content": "OPENAI_API_KEY is not configured",
-            }],
+            "title_violations": [],
             "commit_violations": [],
             "comment_violations": [],
-            "has_violations": True,
-            "comment": "❌ AI text review is required but OPENAI_API_KEY is missing.",
+            "has_violations": False,
+            "comment": "⚠️ AI text review skipped: OPENAI_API_KEY is not configured.",
             "should_comment": True,
         }
 
@@ -135,7 +132,8 @@ def run(pr_title, commits, diff_text):
                     "content": (item.get("summary") or "Commit message should be improved")[:300],
                 })
 
-        has_violations = bool(title_violations or commit_violations)
+        # AI review is advisory and must not fail the overall commit status.
+        has_violations = False
 
         return {
             "feature": FEATURE_KEY,
