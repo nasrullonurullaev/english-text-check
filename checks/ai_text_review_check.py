@@ -8,7 +8,7 @@ AI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-mini")
 SYSTEM_PROMPT = """
 You are a strict reviewer for pull request text quality.
 
-Evaluate a commit or pull-request title text against these 7 rules:
+Evaluate a commit or pull-request title text against these 8 rules:
 
 1. Separate subject from body with a blank line (for commit messages)
 2. Limit the subject line to 50 characters
@@ -17,6 +17,7 @@ Evaluate a commit or pull-request title text against these 7 rules:
 5. Use the imperative mood in the subject line
 6. Wrap the body at 72 characters (for commit messages with body)
 7. Use the body to explain what and why vs. how
+8. If text includes bracketed platform tags like [iOS], [Android], [Web], treat them as valid context markers, not a style violation
 
 Return ONLY valid JSON in this exact shape:
 {
