@@ -58,7 +58,7 @@ def _review_text(client, item_type, text):
 
 def _build_comment(pr_title_result, commit_results):
     lines = [
-        "### 🤖 AI text review",
+        "### 🤖 PR title & commit message review",
         "ℹ️ Review is based on the 7 classic commit message rules: https://chris.beams.io/git-commit#seven-rules",
     ]
 
