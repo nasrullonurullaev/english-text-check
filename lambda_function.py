@@ -5,6 +5,7 @@ import hashlib
 import base64
 import urllib.request
 import urllib.error
+import inspect
 
 from checks import get_enabled_checks
 from checks import english_text_check
@@ -288,7 +289,14 @@ def is_ai_review_enabled_for_repo(repo_name):
     return repo_name in AI_REPOSITORY_WHITELIST
 
 
-def run_enabled_checks(pr_title, commits, diff_text, repo_name=""):
+def run_enabled_checks(
+    pr_title,
+    commits,
+    diff_text,
+    repo_name="",
+    base_branch="",
+    pr_comments=None,
+):
     results = []
     for check in get_enabled_checks():
         if (
@@ -297,7 +305,18 @@ def run_enabled_checks(pr_title, commits, diff_text, repo_name=""):
         ):
             continue
 
-        raw_result = check.run(pr_title=pr_title, commits=commits, diff_text=diff_text)
+        run_signature = inspect.signature(check.run)
+        run_kwargs = {
+            "pr_title": pr_title,
+            "commits": commits,
+            "diff_text": diff_text,
+        }
+        if "base_branch" in run_signature.parameters:
+            run_kwargs["base_branch"] = base_branch
+        if "pr_comments" in run_signature.parameters:
+            run_kwargs["pr_comments"] = pr_comments or []
+
+        raw_result = check.run(**run_kwargs)
         results.append(normalize_check_result(raw_result))
     return results
 
@@ -387,6 +406,7 @@ def lambda_handler(event, context):
         pr = payload.get("pull_request") or {}
         pr_number = payload.get("number") or pr.get("number")
         sha = ((pr.get("head") or {}).get("sha")) or ""
+        base_branch = ((pr.get("base") or {}).get("ref")) or ""
         pr_html_url = pr.get("html_url") or ""
         pr_title = pr.get("title") or ""
 
@@ -421,11 +441,19 @@ def lambda_handler(event, context):
             print("DEBUG commit check skipped:", str(e))
             commits = []
 
+        try:
+            _, _, _, pr_comments = list_pr_comments(repo_owner, repo_name, int(pr_number))
+        except Exception as e:
+            print("DEBUG PR comments fetch skipped:", str(e))
+            pr_comments = []
+
         check_results = run_enabled_checks(
             pr_title=pr_title,
             commits=commits,
             diff_text=diff_text,
             repo_name=repo_name,
+            base_branch=base_branch,
+            pr_comments=pr_comments,
         )
         aggregated = aggregate_check_results(check_results)
 
