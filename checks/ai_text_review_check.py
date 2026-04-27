@@ -1,8 +1,10 @@
 import os
+import importlib
 
 
 FEATURE_KEY = "ai_text_review"
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-3-7-sonnet-latest")
+ANTHROPIC_AVAILABLE = importlib.util.find_spec("anthropic") is not None
 
 REVIEW_PROMPT_TEMPLATE = """
 Read CLAUDE.md from the repository root to understand the repository context (tech stack, project structure, review focus, coding standards).
@@ -189,9 +191,19 @@ def run(pr_title, commits, diff_text, base_branch="", pr_comments=None):
             "should_comment": True,
         }
 
-    try:
-        from anthropic import Anthropic
+    if not ANTHROPIC_AVAILABLE:
+        return {
+            "feature": FEATURE_KEY,
+            "title_violations": [],
+            "commit_violations": [],
+            "comment_violations": [],
+            "has_violations": False,
+            "comment": "⚠️ Claude review skipped: anthropic package is not installed.",
+            "should_comment": True,
+        }
 
+    Anthropic = importlib.import_module("anthropic").Anthropic
+    try:
         client = Anthropic(api_key=api_key)
         context_block = _build_context_block(
             pr_title=pr_title,
