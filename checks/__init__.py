@@ -1,7 +1,3 @@
-from checks import english_text_check
-from checks import ai_text_review_check
-
-
 def get_enabled_checks():
     """Registry of PR checks.
 
@@ -17,4 +13,7 @@ def get_enabled_checks():
       - `has_violations`: bool
       - `comment`: str
     """
+    from checks import english_text_check
+    from checks import ai_text_review_check
+
     return [english_text_check, ai_text_review_check]

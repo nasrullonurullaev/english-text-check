@@ -3,8 +3,8 @@ import json
 import hmac
 import hashlib
 
+import pytest
 import lambda_function as lf
-from checks import ai_text_review_check as ai_check
 
 
 def test_verify_signature_accepts_gitea_header(monkeypatch):
@@ -368,6 +368,9 @@ def test_upsert_pr_comment_creates_when_no_managed_comment(monkeypatch):
 
 
 def test_ai_text_review_is_advisory_when_api_key_missing(monkeypatch):
+    pytest.importorskip("anthropic")
+    from checks import ai_text_review_check as ai_check
+
     monkeypatch.delenv("CLAUDE_API_KEY", raising=False)
     result = ai_check.run(pr_title="test", commits=[], diff_text="")
 
@@ -377,11 +380,17 @@ def test_ai_text_review_is_advisory_when_api_key_missing(monkeypatch):
 
 
 def test_extract_verdict_recognizes_blocked():
+    pytest.importorskip("anthropic")
+    from checks import ai_text_review_check as ai_check
+
     verdict = ai_check._extract_verdict("<summary>❌ BLOCKED - Claude Code Review</summary>")
     assert verdict == "blocked"
 
 
 def test_ai_check_requires_claude_api_key(monkeypatch):
+    pytest.importorskip("anthropic")
+    from checks import ai_text_review_check as ai_check
+
     monkeypatch.delenv("CLAUDE_API_KEY", raising=False)
 
     result = ai_check.run(pr_title="Fix title", commits=[], diff_text="")
