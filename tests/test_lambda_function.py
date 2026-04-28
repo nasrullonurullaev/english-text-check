@@ -28,35 +28,6 @@ def test_extract_request_body_base64():
     assert text == original
 
 
-def test_extract_invalid_pr_title_ignores_non_ascii_inside_quotes():
-    title = 'Fix parser for "Привет" string'
-    assert lf.extract_invalid_pr_title(title) == []
-
-
-def test_extract_invalid_pr_title_detects_non_ascii_outside_quotes():
-    title = "Исправить parser bug"
-    violations = lf.extract_invalid_pr_title(title)
-    assert len(violations) == 1
-    assert violations[0]["type"] == "pr_title"
-
-
-def test_extract_non_ascii_comments_detects_violations_and_skips_excluded_files():
-    diff = "\n".join(
-        [
-            "diff --git a/src/main.py b/src/main.py",
-            "+++ b/src/main.py",
-            "+# Привет мир",
-            "diff --git a/docs/readme.md b/docs/readme.md",
-            "+++ b/docs/readme.md",
-            "+# Привет в md",
-        ]
-    )
-
-    violations = lf.extract_non_ascii_comments(diff)
-    assert len(violations) == 1
-    assert violations[0]["file"] == "src/main.py"
-
-
 def test_lambda_handler_success_path(monkeypatch):
     monkeypatch.setattr(lf, "GITEA_BASE_URL", "https://example.com")
     monkeypatch.setattr(lf, "GITEA_TOKEN", "token")
@@ -146,14 +117,7 @@ def test_run_enabled_checks_normalizes_result(monkeypatch):
     assert result["comment"] == ""
 
 
-def test_run_enabled_checks_skips_ai_for_non_whitelisted_repo(monkeypatch):
-    class EnglishCheck:
-        FEATURE_KEY = "english_text"
-
-        @staticmethod
-        def run(pr_title, commits, diff_text):
-            return {"feature": "english_text"}
-
+def test_run_enabled_checks_runs_ai_for_any_repo(monkeypatch):
     class AiCheck:
         FEATURE_KEY = "ai_text_review"
 
@@ -161,9 +125,7 @@ def test_run_enabled_checks_skips_ai_for_non_whitelisted_repo(monkeypatch):
         def run(pr_title, commits, diff_text):
             return {"feature": "ai_text_review"}
 
-    monkeypatch.setattr(lf, "get_enabled_checks", lambda: [EnglishCheck, AiCheck])
-    monkeypatch.setattr(lf, "AI_REPOSITORY_WHITELIST", {"DocSpace-buildtools"})
-
+    monkeypatch.setattr(lf, "get_enabled_checks", lambda: [AiCheck])
     results = lf.run_enabled_checks(
         "title",
         [],
@@ -171,45 +133,31 @@ def test_run_enabled_checks_skips_ai_for_non_whitelisted_repo(monkeypatch):
         repo_name="some-other-repo",
     )
     assert len(results) == 1
-    assert results[0]["feature"] == "english_text"
+    assert results[0]["feature"] == "ai_text_review"
 
 
-def test_run_enabled_checks_includes_ai_for_whitelisted_repo(monkeypatch):
-    class EnglishCheck:
-        FEATURE_KEY = "english_text"
-
-        @staticmethod
-        def run(pr_title, commits, diff_text):
-            return {"feature": "english_text"}
-
+def test_run_enabled_checks_passes_optional_arguments_to_ai(monkeypatch):
     class AiCheck:
         FEATURE_KEY = "ai_text_review"
 
         @staticmethod
-        def run(pr_title, commits, diff_text):
+        def run(pr_title, commits, diff_text, base_branch="", pr_comments=None):
+            assert base_branch == "release/v1"
+            assert pr_comments == [{"id": 1, "body": "old comment"}]
             return {"feature": "ai_text_review"}
 
-    monkeypatch.setattr(lf, "get_enabled_checks", lambda: [EnglishCheck, AiCheck])
-    monkeypatch.setattr(lf, "AI_REPOSITORY_WHITELIST", {"DocSpace-buildtools"})
+    monkeypatch.setattr(lf, "get_enabled_checks", lambda: [AiCheck])
 
     results = lf.run_enabled_checks(
         "title",
         [],
         "diff --git a/a b/a",
-        repo_name="DocSpace-buildtools",
+        repo_name="any-repo",
+        base_branch="release/v1",
+        pr_comments=[{"id": 1, "body": "old comment"}],
     )
-    assert len(results) == 2
-    assert results[0]["feature"] == "english_text"
-    assert results[1]["feature"] == "ai_text_review"
-
-
-def test_aggregate_english_result_fallback():
-    result = lf.aggregate_english_result([{"feature": "other"}])
-    assert result["title_violations"] == []
-    assert result["commit_violations"] == []
-    assert result["comment_violations"] == []
-    assert result["has_violations"] is False
-    assert result["comment"] == ""
+    assert len(results) == 1
+    assert results[0]["feature"] == "ai_text_review"
 
 
 def test_aggregate_check_results_collects_all_and_comments():

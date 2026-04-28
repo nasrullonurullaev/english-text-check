@@ -8,28 +8,19 @@ import urllib.error
 import inspect
 
 from checks import get_enabled_checks
-from checks import english_text_check
 
 
 GITEA_BASE_URL = os.getenv("GITEA_BASE_URL", "").rstrip("/")
 GITEA_TOKEN = os.getenv("GITEA_TOKEN", "")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
 ORG_NAME = os.getenv("ORG_NAME", "ONLYOFFICE")
-STATUS_CONTEXT = os.getenv("STATUS_CONTEXT", "English-Text-Check")
+STATUS_CONTEXT = os.getenv("STATUS_CONTEXT", "Claude Code PR Review")
 
 ALLOWED_ACTIONS = set(
     x.strip()
     for x in os.getenv(
         "ALLOWED_ACTIONS",
         "opened,reopened,synchronize,edited,synchronized"
-    ).split(",")
-    if x.strip()
-)
-AI_REPOSITORY_WHITELIST = set(
-    x.strip()
-    for x in os.getenv(
-        "AI_REPOSITORY_WHITELIST",
-        "DocSpace-buildtools,document-server-package",
     ).split(",")
     if x.strip()
 )
@@ -92,7 +83,7 @@ def http_request(method, url, payload=None, accept="application/json"):
     headers = {
         "Authorization": "token " + GITEA_TOKEN,
         "Accept": accept,
-        "User-Agent": "gitea-english-text-check-lambda",
+        "User-Agent": "gitea-claude-code-pr-review-lambda",
     }
 
     data = None
@@ -283,12 +274,6 @@ def normalize_check_result(raw_result):
     return normalized
 
 
-def is_ai_review_enabled_for_repo(repo_name):
-    if not repo_name:
-        return False
-    return repo_name in AI_REPOSITORY_WHITELIST
-
-
 def run_enabled_checks(
     pr_title,
     commits,
@@ -299,12 +284,6 @@ def run_enabled_checks(
 ):
     results = []
     for check in get_enabled_checks():
-        if (
-            getattr(check, "FEATURE_KEY", "") == "ai_text_review"
-            and not is_ai_review_enabled_for_repo(repo_name)
-        ):
-            continue
-
         run_signature = inspect.signature(check.run)
         run_kwargs = {
             "pr_title": pr_title,
@@ -319,21 +298,6 @@ def run_enabled_checks(
         raw_result = check.run(**run_kwargs)
         results.append(normalize_check_result(raw_result))
     return results
-
-
-def aggregate_english_result(check_results):
-    for result in check_results:
-        if result.get("feature") == english_text_check.FEATURE_KEY:
-            return result
-
-    return {
-        "title_violations": [],
-        "commit_violations": [],
-        "comment_violations": [],
-        "has_violations": False,
-        "comment": "",
-        "should_comment": False,
-    }
 
 
 def aggregate_check_results(check_results):
@@ -361,12 +325,6 @@ def aggregate_check_results(check_results):
         "has_violations": has_violations,
         "comment": "\n\n---\n\n".join(comments_to_post),
     }
-
-
-# Backward-compatible exports used by tests and existing integrations.
-extract_non_ascii_comments = english_text_check.extract_non_ascii_comments
-extract_invalid_pr_title = english_text_check.extract_invalid_pr_title
-extract_invalid_commit_messages = english_text_check.extract_invalid_commit_messages
 
 
 def lambda_handler(event, context):
@@ -421,7 +379,7 @@ def lambda_handler(event, context):
             repo_name,
             sha,
             "pending",
-            "English text check is running",
+            "Claude Code PR review is running",
             pr_html_url,
         )
 

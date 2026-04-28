@@ -13,7 +13,6 @@ def get_enabled_checks():
       - `has_violations`: bool
       - `comment`: str
     """
-    from checks import english_text_check
     from checks import ai_text_review_check
 
-    return [english_text_check, ai_text_review_check]
+    return [ai_text_review_check]
