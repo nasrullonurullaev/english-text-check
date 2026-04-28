@@ -3,7 +3,7 @@ from anthropic import Anthropic
 
 
 FEATURE_KEY = "ai_text_review"
-CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-3-7-sonnet-latest")
+CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-opus-4-7")
 
 REVIEW_PROMPT_TEMPLATE = """
 Read CLAUDE.md from the repository root to understand the repository context (tech stack, project structure, review focus, coding standards).
@@ -46,6 +46,29 @@ Evaluate PR title and commit messages using these rules:
 - Treat violations as:
   - 🟡 Medium → if it affects readability/standards consistency
   - 🔵 Low → minor formatting issues
+
+### 2.2 Validate Code Comments Language
+
+- Check **only comments inside code** (inline and block comments)
+- **Do NOT check**:
+  - UI strings
+  - localization files
+  - variable names
+  - function names
+  - string literals
+- Detect usage of **Russian language in code comments**
+
+Severity:
+- 🟡 Medium — if it impacts readability for international team
+- 🔵 Low — if isolated cases
+
+When reporting issues, use this format:
+
+<details><summary>🟡 Medium: Russian comments in code</summary>
+File: path/file.ext:42
+Why: Comments are written in Russian, which reduces accessibility for non-Russian-speaking contributors.
+Fix: Rewrite comments in English
+</details>
 
 ### 3. Verdict Logic
 
@@ -131,7 +154,6 @@ Respond with exactly this structure (no extra lines outside it):
 - **Issue counter**: replace each `X` with actual count (`0` if none); Fixed = total ⚪️ Fixed across all categories
 - **Strict format**: output ONLY the structure from section 4 — do not add any extra lines, summaries, or sections outside it
 """.strip()
-
 
 def _read_file_if_exists(path):
     if not os.path.exists(path):
