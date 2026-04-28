@@ -117,6 +117,27 @@ def test_run_enabled_checks_normalizes_result(monkeypatch):
     assert result["comment"] == ""
 
 
+def test_run_enabled_checks_normalizes_non_list_violations(monkeypatch):
+    class BadCheck:
+        @staticmethod
+        def run(pr_title, commits, diff_text):
+            return {
+                "feature": "custom",
+                "title_violations": "bad-type",
+                "commit_violations": {"kind": "x"},
+                "comment_violations": ("tuple-item",),
+            }
+
+    monkeypatch.setattr(lf, "get_enabled_checks", lambda: [BadCheck])
+
+    results = lf.run_enabled_checks("title", [], "diff --git a/a b/a")
+    result = results[0]
+
+    assert result["title_violations"] == []
+    assert result["commit_violations"] == []
+    assert result["comment_violations"] == ["tuple-item"]
+
+
 def test_run_enabled_checks_runs_ai_for_any_repo(monkeypatch):
     class AiCheck:
         FEATURE_KEY = "ai_text_review"

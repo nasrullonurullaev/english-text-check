@@ -260,13 +260,20 @@ def normalize_check_result(raw_result):
     result = raw_result if isinstance(raw_result, dict) else {}
     normalized = {}
 
+    def _normalize_violations(value):
+        if isinstance(value, list):
+            return value
+        if isinstance(value, tuple):
+            return list(value)
+        return []
+
     for field in REQUIRED_CHECK_FIELDS:
         normalized[field] = result.get(field)
 
     normalized["feature"] = str(normalized["feature"] or "")
-    normalized["title_violations"] = normalized["title_violations"] or []
-    normalized["commit_violations"] = normalized["commit_violations"] or []
-    normalized["comment_violations"] = normalized["comment_violations"] or []
+    normalized["title_violations"] = _normalize_violations(normalized["title_violations"])
+    normalized["commit_violations"] = _normalize_violations(normalized["commit_violations"])
+    normalized["comment_violations"] = _normalize_violations(normalized["comment_violations"])
     normalized["has_violations"] = bool(normalized["has_violations"])
     normalized["comment"] = str(normalized["comment"] or "")
     normalized["should_comment"] = bool(result.get("should_comment", normalized["has_violations"]))
