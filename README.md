@@ -30,7 +30,7 @@ Optional:
 Claude review options:
 
 - `CLAUDE_API_KEY` (required to call Claude)
-- `CLAUDE_MODEL` (default: `claude-3-7-sonnet-latest`)
+- `CLAUDE_MODEL` (default: `claude-opus-4-7`)
 
 `ai_text_review_check` runs for all repositories.
 

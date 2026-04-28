@@ -10,13 +10,13 @@ import inspect
 from checks import get_enabled_checks
 
 
-GITEA_BASE_URL = os.getenv("GITEA_BASE_URL", "").rstrip("/")
-GITEA_TOKEN = os.getenv("GITEA_TOKEN", "")
-WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
-ORG_NAME = os.getenv("ORG_NAME", "ONLYOFFICE")
-STATUS_CONTEXT = os.getenv("STATUS_CONTEXT", "Claude Code PR Review")
+DEFAULT_GITEA_BASE_URL = os.getenv("GITEA_BASE_URL", "").rstrip("/")
+DEFAULT_GITEA_TOKEN = os.getenv("GITEA_TOKEN", "")
+DEFAULT_WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
+DEFAULT_ORG_NAME = os.getenv("ORG_NAME", "ONLYOFFICE")
+DEFAULT_STATUS_CONTEXT = os.getenv("STATUS_CONTEXT", "Claude Code PR Review")
 
-ALLOWED_ACTIONS = set(
+DEFAULT_ALLOWED_ACTIONS = set(
     x.strip()
     for x in os.getenv(
         "ALLOWED_ACTIONS",
@@ -36,6 +36,32 @@ REQUIRED_CHECK_FIELDS = (
 )
 COMMENT_MARKER = "<!-- english-text-check:managed -->"
 
+# Backward compatibility for tests or direct monkeypatching.
+GITEA_BASE_URL = DEFAULT_GITEA_BASE_URL
+GITEA_TOKEN = DEFAULT_GITEA_TOKEN
+WEBHOOK_SECRET = DEFAULT_WEBHOOK_SECRET
+ORG_NAME = DEFAULT_ORG_NAME
+STATUS_CONTEXT = DEFAULT_STATUS_CONTEXT
+ALLOWED_ACTIONS = set(DEFAULT_ALLOWED_ACTIONS)
+
+
+def load_config():
+    return {
+        "gitea_base_url": os.getenv("GITEA_BASE_URL", GITEA_BASE_URL).rstrip("/"),
+        "gitea_token": os.getenv("GITEA_TOKEN", GITEA_TOKEN),
+        "webhook_secret": os.getenv("WEBHOOK_SECRET", WEBHOOK_SECRET),
+        "org_name": os.getenv("ORG_NAME", ORG_NAME),
+        "status_context": os.getenv("STATUS_CONTEXT", STATUS_CONTEXT),
+        "allowed_actions": set(
+            x.strip()
+            for x in os.getenv(
+                "ALLOWED_ACTIONS",
+                ",".join(sorted(ALLOWED_ACTIONS)),
+            ).split(",")
+            if x.strip()
+        ),
+    }
+
 
 def response(status_code, body):
     return {
@@ -51,8 +77,9 @@ def normalize_headers(headers):
     return {str(k).lower(): str(v) for k, v in headers.items()}
 
 
-def verify_signature(raw_body, headers):
-    if not WEBHOOK_SECRET:
+def verify_signature(raw_body, headers, webhook_secret=None):
+    secret = webhook_secret if webhook_secret is not None else WEBHOOK_SECRET
+    if not secret:
         return False
 
     lower = normalize_headers(headers)
@@ -62,7 +89,7 @@ def verify_signature(raw_body, headers):
     sig_hub_256 = lower.get("x-hub-signature-256")
 
     digest = hmac.new(
-        WEBHOOK_SECRET.encode("utf-8"),
+        secret.encode("utf-8"),
         raw_body,
         hashlib.sha256,
     ).hexdigest()
@@ -79,9 +106,10 @@ def verify_signature(raw_body, headers):
     return False
 
 
-def http_request(method, url, payload=None, accept="application/json"):
+def http_request(method, url, payload=None, accept="application/json", gitea_token=None):
+    token = gitea_token if gitea_token is not None else GITEA_TOKEN
     headers = {
-        "Authorization": "token " + GITEA_TOKEN,
+        "Authorization": "token " + token,
         "Accept": accept,
         "User-Agent": "gitea-claude-code-pr-review-lambda",
     }
@@ -104,12 +132,16 @@ def http_request(method, url, payload=None, accept="application/json"):
         return 599, str(e), {}
 
 
-def gitea_api_request(method, path, payload=None, accept="application/json"):
-    if not GITEA_BASE_URL or not GITEA_TOKEN:
+def gitea_api_request(method, path, payload=None, accept="application/json", config=None):
+    cfg = config or load_config()
+    gitea_base_url = cfg["gitea_base_url"]
+    gitea_token = cfg["gitea_token"]
+
+    if not gitea_base_url or not gitea_token:
         return 599, "Missing GITEA_BASE_URL or GITEA_TOKEN", {}
 
-    url = GITEA_BASE_URL + path
-    return http_request(method, url, payload=payload, accept=accept)
+    url = gitea_base_url + path
+    return http_request(method, url, payload=payload, accept=accept, gitea_token=gitea_token)
 
 
 def post_pr_comment(owner, repo, pr_number, text):
@@ -175,7 +207,8 @@ def upsert_pr_comment(owner, repo, pr_number, text):
     return post_pr_comment(owner, repo, pr_number, managed_text)
 
 
-def set_commit_status(owner, repo, sha, state, description, target_url=""):
+def set_commit_status(owner, repo, sha, state, description, target_url="", config=None):
+    cfg = config or load_config()
     path = "/api/v1/repos/{owner}/{repo}/statuses/{sha}".format(
         owner=owner,
         repo=repo,
@@ -184,7 +217,7 @@ def set_commit_status(owner, repo, sha, state, description, target_url=""):
 
     payload = {
         "state": state,
-        "context": STATUS_CONTEXT,
+        "context": cfg["status_context"],
         "description": description[:140],
     }
 
@@ -336,11 +369,13 @@ def aggregate_check_results(check_results):
 
 def lambda_handler(event, context):
     try:
-        if not GITEA_BASE_URL:
+        config = load_config()
+
+        if not config["gitea_base_url"]:
             return response(500, {"ok": False, "error": "Missing env var GITEA_BASE_URL"})
-        if not GITEA_TOKEN:
+        if not config["gitea_token"]:
             return response(500, {"ok": False, "error": "Missing env var GITEA_TOKEN"})
-        if not WEBHOOK_SECRET:
+        if not config["webhook_secret"]:
             return response(500, {"ok": False, "error": "Missing env var WEBHOOK_SECRET"})
 
         headers = event.get("headers") or {}
@@ -348,7 +383,7 @@ def lambda_handler(event, context):
 
         raw_body, body_text = extract_request_body(event)
 
-        if not verify_signature(raw_body, headers):
+        if not verify_signature(raw_body, headers, webhook_secret=config["webhook_secret"]):
             return response(401, {"ok": False, "error": "bad signature"})
 
         event_name = lower_headers.get("x-gitea-event") or lower_headers.get("x-github-event")
@@ -358,10 +393,10 @@ def lambda_handler(event, context):
         payload = json.loads(body_text)
         action = payload.get("action")
 
-        if action not in ALLOWED_ACTIONS:
+        if action not in config["allowed_actions"]:
             return response(200, {"ok": True, "ignored": True, "reason": "unsupported action"})
 
-        if not is_org_pr(payload, ORG_NAME):
+        if not is_org_pr(payload, config["org_name"]):
             return response(200, {"ok": True, "ignored": True, "reason": "not org PR"})
 
         repo = payload.get("repository") or {}
@@ -388,6 +423,7 @@ def lambda_handler(event, context):
             "pending",
             "Claude Code PR review is running",
             pr_html_url,
+            config=config,
         )
 
         if pending_status >= 300:
@@ -457,6 +493,7 @@ def lambda_handler(event, context):
             status_state,
             status_description,
             pr_html_url,
+            config=config,
         )
 
         if final_status >= 300:
@@ -475,7 +512,7 @@ def lambda_handler(event, context):
             "title_violations": len(title_violations),
             "commit_violations": len(commit_violations),
             "comment_violations": len(comment_violations),
-            "status_context": STATUS_CONTEXT,
+            "status_context": config["status_context"],
             "status_state": status_state,
         })
 
