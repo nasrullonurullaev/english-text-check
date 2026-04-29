@@ -44,8 +44,7 @@ Evaluate PR title and commit messages using these rules:
 
 - Report violations in **🎨 Style** section
 - Treat violations as:
-  - 🟡 Medium → if it affects readability/standards consistency
-  - 🔵 Low → minor formatting issues
+  - 🔵 Low → stylistic issues or minor formatting inconsistencies (warning only, does not impact severity)
 
 ### 2.2 Validate Code Comments Language
 
