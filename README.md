@@ -26,13 +26,14 @@ Optional:
 - `ORG_NAME` (default: `ONLYOFFICE`)
 - `STATUS_CONTEXT` (default: `Claude Code PR Review`)
 - `ALLOWED_ACTIONS` (default: `opened,reopened,synchronize,edited,synchronized`)
+- `ALLOWED_REPOSITORIES` (default: empty, means all repositories in `ORG_NAME`; supports `repo` or `owner/repo`, comma-separated)
 
 Claude review options:
 
 - `CLAUDE_API_KEY` (required to call Claude)
 - `CLAUDE_MODEL` (default: `claude-opus-4-7`)
 
-`ai_text_review_check` runs for all repositories.
+Use `ALLOWED_REPOSITORIES` to enforce a whitelist of repositories where this Lambda is allowed to run.
 
 ## Claude dependency
 

@@ -367,3 +367,52 @@ def test_ai_check_requires_claude_api_key(monkeypatch):
     assert result["has_violations"] is False
     assert result["should_comment"] is True
     assert result["title_violations"] == []
+
+
+def test_is_repository_allowed_with_empty_whitelist():
+    assert lf.is_repository_allowed("ONLYOFFICE", "repo", set()) is True
+
+
+def test_is_repository_allowed_matches_name_and_full_name():
+    assert lf.is_repository_allowed("ONLYOFFICE", "repo", {"repo"}) is True
+    assert lf.is_repository_allowed("ONLYOFFICE", "repo", {"ONLYOFFICE/repo"}) is True
+    assert lf.is_repository_allowed("ONLYOFFICE", "repo", {"another"}) is False
+
+
+def test_lambda_handler_ignores_disallowed_repository(monkeypatch):
+    monkeypatch.setattr(lf, "GITEA_BASE_URL", "https://example.com")
+    monkeypatch.setattr(lf, "GITEA_TOKEN", "token")
+    monkeypatch.setattr(lf, "WEBHOOK_SECRET", "secret")
+    monkeypatch.setattr(lf, "ORG_NAME", "ONLYOFFICE")
+    monkeypatch.setattr(lf, "ALLOWED_REPOSITORIES", {"ONLYOFFICE/allowed-repo"})
+
+    payload = {
+        "action": "opened",
+        "number": 1,
+        "repository": {"name": "blocked-repo", "owner": {"login": "ONLYOFFICE"}},
+        "pull_request": {
+            "number": 1,
+            "title": "Fix english text",
+            "html_url": "https://example.com/pr/1",
+            "head": {"sha": "abc123"},
+            "base": {"repo": {"owner": {"login": "ONLYOFFICE"}}},
+        },
+    }
+    body_text = json.dumps(payload)
+    digest = hmac.new(b"secret", body_text.encode("utf-8"), hashlib.sha256).hexdigest()
+
+    event = {
+        "headers": {
+            "X-Gitea-Event": "pull_request",
+            "X-Gitea-Signature": digest,
+        },
+        "body": body_text,
+        "isBase64Encoded": False,
+    }
+
+    result = lf.lambda_handler(event, None)
+
+    assert result["statusCode"] == 200
+    body = json.loads(result["body"])
+    assert body["ignored"] is True
+    assert body["reason"] == "repository not allowed"

@@ -43,6 +43,11 @@ WEBHOOK_SECRET = DEFAULT_WEBHOOK_SECRET
 ORG_NAME = DEFAULT_ORG_NAME
 STATUS_CONTEXT = DEFAULT_STATUS_CONTEXT
 ALLOWED_ACTIONS = set(DEFAULT_ALLOWED_ACTIONS)
+ALLOWED_REPOSITORIES = set(
+    x.strip()
+    for x in os.getenv("ALLOWED_REPOSITORIES", "").split(",")
+    if x.strip()
+)
 
 
 def load_config():
@@ -57,6 +62,14 @@ def load_config():
             for x in os.getenv(
                 "ALLOWED_ACTIONS",
                 ",".join(sorted(ALLOWED_ACTIONS)),
+            ).split(",")
+            if x.strip()
+        ),
+        "allowed_repositories": set(
+            x.strip()
+            for x in os.getenv(
+                "ALLOWED_REPOSITORIES",
+                ",".join(sorted(ALLOWED_REPOSITORIES)),
             ).split(",")
             if x.strip()
         ),
@@ -239,6 +252,14 @@ def is_org_pr(payload, org_name):
     return base_owner == org_name or parent_owner == org_name
 
 
+
+def is_repository_allowed(repo_owner, repo_name, allowed_repositories):
+    if not allowed_repositories:
+        return True
+
+    full_name = "{0}/{1}".format(repo_owner, repo_name)
+    return repo_name in allowed_repositories or full_name in allowed_repositories
+
 def extract_request_body(event):
     body = event.get("body") or ""
     if event.get("isBase64Encoded"):
@@ -402,6 +423,9 @@ def lambda_handler(event, context):
         repo = payload.get("repository") or {}
         repo_owner = ((repo.get("owner") or {}).get("login")) or ""
         repo_name = repo.get("name") or ""
+
+        if not is_repository_allowed(repo_owner, repo_name, config["allowed_repositories"]):
+            return response(200, {"ok": True, "ignored": True, "reason": "repository not allowed"})
 
         pr = payload.get("pull_request") or {}
         pr_number = payload.get("number") or pr.get("number")
