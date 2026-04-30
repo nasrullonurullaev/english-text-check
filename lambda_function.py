@@ -48,6 +48,14 @@ ALLOWED_REPOSITORIES = set(
     for x in os.getenv("ALLOWED_REPOSITORIES", "").split(",")
     if x.strip()
 )
+DEFAULT_ALLOWED_BASE_BRANCH_PATTERNS = tuple(
+    x.strip()
+    for x in os.getenv(
+        "ALLOWED_BASE_BRANCH_PATTERNS",
+        "release/*,hotfix/*",
+    ).split(",")
+    if x.strip()
+)
 
 
 def load_config():
@@ -70,6 +78,14 @@ def load_config():
             for x in os.getenv(
                 "ALLOWED_REPOSITORIES",
                 ",".join(sorted(ALLOWED_REPOSITORIES)),
+            ).split(",")
+            if x.strip()
+        ),
+        "allowed_base_branch_patterns": tuple(
+            x.strip()
+            for x in os.getenv(
+                "ALLOWED_BASE_BRANCH_PATTERNS",
+                ",".join(DEFAULT_ALLOWED_BASE_BRANCH_PATTERNS),
             ).split(",")
             if x.strip()
         ),
@@ -260,6 +276,22 @@ def is_repository_allowed(repo_owner, repo_name, allowed_repositories):
     full_name = "{0}/{1}".format(repo_owner, repo_name)
     return repo_name in allowed_repositories or full_name in allowed_repositories
 
+
+def is_base_branch_allowed(base_branch, allowed_patterns):
+    if not allowed_patterns:
+        return True
+
+    for pattern in allowed_patterns:
+        if pattern.endswith("*"):
+            if base_branch.startswith(pattern[:-1]):
+                return True
+            continue
+
+        if base_branch == pattern:
+            return True
+
+    return False
+
 def extract_request_body(event):
     body = event.get("body") or ""
     if event.get("isBase64Encoded"):
@@ -423,14 +455,17 @@ def lambda_handler(event, context):
         repo = payload.get("repository") or {}
         repo_owner = ((repo.get("owner") or {}).get("login")) or ""
         repo_name = repo.get("name") or ""
+        pr = payload.get("pull_request") or {}
+        base_branch = ((pr.get("base") or {}).get("ref")) or ""
 
         if not is_repository_allowed(repo_owner, repo_name, config["allowed_repositories"]):
             return response(200, {"ok": True, "ignored": True, "reason": "repository not allowed"})
 
-        pr = payload.get("pull_request") or {}
+        if not is_base_branch_allowed(base_branch, config["allowed_base_branch_patterns"]):
+            return response(200, {"ok": True, "ignored": True, "reason": "base branch not allowed"})
+
         pr_number = payload.get("number") or pr.get("number")
         sha = ((pr.get("head") or {}).get("sha")) or ""
-        base_branch = ((pr.get("base") or {}).get("ref")) or ""
         pr_html_url = pr.get("html_url") or ""
         pr_title = pr.get("title") or ""
 

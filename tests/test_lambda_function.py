@@ -43,7 +43,7 @@ def test_lambda_handler_success_path(monkeypatch):
             "title": "Fix english text",
             "html_url": "https://example.com/pr/42",
             "head": {"sha": "abc123"},
-            "base": {"repo": {"owner": {"login": "ONLYOFFICE"}}},
+            "base": {"ref": "release/v1", "repo": {"owner": {"login": "ONLYOFFICE"}}},
         },
     }
     body_text = json.dumps(payload)
@@ -227,7 +227,7 @@ def test_lambda_handler_posts_comment_when_check_requests_it(monkeypatch):
             "title": "Fix english text",
             "html_url": "https://example.com/pr/42",
             "head": {"sha": "abc123"},
-            "base": {"repo": {"owner": {"login": "ONLYOFFICE"}}},
+            "base": {"ref": "release/v1", "repo": {"owner": {"login": "ONLYOFFICE"}}},
         },
     }
     body_text = json.dumps(payload)
@@ -379,6 +379,13 @@ def test_is_repository_allowed_matches_name_and_full_name():
     assert lf.is_repository_allowed("ONLYOFFICE", "repo", {"another"}) is False
 
 
+def test_is_base_branch_allowed_matches_release_hotfix_patterns():
+    patterns = ("release/*", "hotfix/*")
+    assert lf.is_base_branch_allowed("release/8.4.1", patterns) is True
+    assert lf.is_base_branch_allowed("hotfix/urgent-fix", patterns) is True
+    assert lf.is_base_branch_allowed("main", patterns) is False
+
+
 def test_lambda_handler_ignores_disallowed_repository(monkeypatch):
     monkeypatch.setattr(lf, "GITEA_BASE_URL", "https://example.com")
     monkeypatch.setattr(lf, "GITEA_TOKEN", "token")
@@ -395,7 +402,7 @@ def test_lambda_handler_ignores_disallowed_repository(monkeypatch):
             "title": "Fix english text",
             "html_url": "https://example.com/pr/1",
             "head": {"sha": "abc123"},
-            "base": {"repo": {"owner": {"login": "ONLYOFFICE"}}},
+            "base": {"ref": "release/v1", "repo": {"owner": {"login": "ONLYOFFICE"}}},
         },
     }
     body_text = json.dumps(payload)
@@ -416,3 +423,41 @@ def test_lambda_handler_ignores_disallowed_repository(monkeypatch):
     body = json.loads(result["body"])
     assert body["ignored"] is True
     assert body["reason"] == "repository not allowed"
+
+
+def test_lambda_handler_ignores_disallowed_base_branch(monkeypatch):
+    monkeypatch.setattr(lf, "GITEA_BASE_URL", "https://example.com")
+    monkeypatch.setattr(lf, "GITEA_TOKEN", "token")
+    monkeypatch.setattr(lf, "WEBHOOK_SECRET", "secret")
+    monkeypatch.setattr(lf, "ORG_NAME", "ONLYOFFICE")
+
+    payload = {
+        "action": "opened",
+        "number": 1,
+        "repository": {"name": "repo", "owner": {"login": "ONLYOFFICE"}},
+        "pull_request": {
+            "number": 1,
+            "title": "Fix english text",
+            "html_url": "https://example.com/pr/1",
+            "head": {"sha": "abc123"},
+            "base": {"ref": "main", "repo": {"owner": {"login": "ONLYOFFICE"}}},
+        },
+    }
+    body_text = json.dumps(payload)
+    digest = hmac.new(b"secret", body_text.encode("utf-8"), hashlib.sha256).hexdigest()
+
+    event = {
+        "headers": {
+            "X-Gitea-Event": "pull_request",
+            "X-Gitea-Signature": digest,
+        },
+        "body": body_text,
+        "isBase64Encoded": False,
+    }
+
+    result = lf.lambda_handler(event, None)
+
+    assert result["statusCode"] == 200
+    body = json.loads(result["body"])
+    assert body["ignored"] is True
+    assert body["reason"] == "base branch not allowed"
